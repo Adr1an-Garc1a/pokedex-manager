@@ -35,6 +35,13 @@ if [[ -z "${FRONTEND_URL:-}" ]]; then
 fi
 CORS_ORIGINS_VALUE="${FRONTEND_URL:-*}"
 
+# OJO 2: por defecto `--set-env-vars` separa pares KEY=VALUE con coma, pero
+# CORS_ORIGINS_VALUE puede tener varias URLs separadas por coma dentro de
+# UN SOLO valor (ver arriba) — con la sintaxis por defecto, gcloud las
+# interpretaría como variables adicionales sin "=" y fallaría con "Bad
+# syntax for dict arg". El prefijo "^;^" le dice a gcloud que use ";" como
+# separador entre pares en vez de ",", así las comas dentro del valor de
+# CORS_ORIGINS quedan intactas (ver `gcloud topic escaping`).
 echo ">> Desplegando backend en Cloud Run: ${BACKEND_SERVICE}"
 echo "   CORS_ORIGINS = ${CORS_ORIGINS_VALUE}"
 gcloud run deploy "${BACKEND_SERVICE}" \
@@ -44,7 +51,7 @@ gcloud run deploy "${BACKEND_SERVICE}" \
   --service-account="${RUNTIME_SA_EMAIL}" \
   --add-cloudsql-instances="${CONNECTION_NAME}" \
   --set-secrets="DATABASE_URL=${SECRET_DB_URL}:latest,JWT_SECRET_KEY=${SECRET_JWT_KEY}:latest,GOOGLE_CLIENT_ID=${SECRET_GOOGLE_CLIENT_ID}:latest" \
-  --set-env-vars="STORAGE_BACKEND=gcs,GCS_BUCKET_NAME=${GCS_BUCKET},ENVIRONMENT=production,CORS_ORIGINS=${CORS_ORIGINS_VALUE}" \
+  --set-env-vars="^;^STORAGE_BACKEND=gcs;GCS_BUCKET_NAME=${GCS_BUCKET};ENVIRONMENT=production;CORS_ORIGINS=${CORS_ORIGINS_VALUE}" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=4 \

@@ -7,6 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./00-config.sh
+source ./lib-service-urls.sh
 
 if [[ ! -f .last-backend-image ]]; then
   echo "ERROR: no se encontró .last-backend-image. Corre primero ./07-build-push.sh" >&2
@@ -22,12 +23,25 @@ CONNECTION_NAME="$(gcloud sql instances describe "${SQL_INSTANCE}" \
 # pasas FRONTEND_URL explícitamente, se autodetecta la URL del frontend ya
 # desplegado (si existe) en vez de caer silenciosamente a "*" y perder el
 # valor correcto en cada redeploy.
+#
+# OJO: un mismo servicio de Cloud Run puede tener más de una URL válida
+# (formato legado con hash y formato nuevo con número de proyecto), y
+# `describe --format=value(status.url)` no siempre coincide con la que el
+# navegador manda como Origin. Por eso se piden TODAS las URLs conocidas
+# del frontend (get_all_service_urls) y se incluyen todas en CORS_ORIGINS,
+# separadas por coma.
 if [[ -z "${FRONTEND_URL:-}" ]]; then
-  FRONTEND_URL="$(gcloud run services describe "${FRONTEND_SERVICE}" \
-    --project="${PROJECT_ID}" --region="${REGION}" --format="value(status.url)" 2>/dev/null || true)"
+  FRONTEND_URL="$(get_all_service_urls "${FRONTEND_SERVICE}" "${PROJECT_ID}" "${REGION}")"
 fi
 CORS_ORIGINS_VALUE="${FRONTEND_URL:-*}"
 
+# OJO 2: por defecto `--set-env-vars` separa pares KEY=VALUE con coma, pero
+# CORS_ORIGINS_VALUE puede tener varias URLs separadas por coma dentro de
+# UN SOLO valor (ver arriba) — con la sintaxis por defecto, gcloud las
+# interpretaría como variables adicionales sin "=" y fallaría con "Bad
+# syntax for dict arg". El prefijo "^;^" le dice a gcloud que use ";" como
+# separador entre pares en vez de ",", así las comas dentro del valor de
+# CORS_ORIGINS quedan intactas (ver `gcloud topic escaping`).
 echo ">> Desplegando backend en Cloud Run: ${BACKEND_SERVICE}"
 echo "   CORS_ORIGINS = ${CORS_ORIGINS_VALUE}"
 gcloud run deploy "${BACKEND_SERVICE}" \
@@ -37,7 +51,7 @@ gcloud run deploy "${BACKEND_SERVICE}" \
   --service-account="${RUNTIME_SA_EMAIL}" \
   --add-cloudsql-instances="${CONNECTION_NAME}" \
   --set-secrets="DATABASE_URL=${SECRET_DB_URL}:latest,JWT_SECRET_KEY=${SECRET_JWT_KEY}:latest,GOOGLE_CLIENT_ID=${SECRET_GOOGLE_CLIENT_ID}:latest" \
-  --set-env-vars="STORAGE_BACKEND=gcs,GCS_BUCKET_NAME=${GCS_BUCKET},ENVIRONMENT=production,CORS_ORIGINS=${CORS_ORIGINS_VALUE}" \
+  --set-env-vars="^;^STORAGE_BACKEND=gcs;GCS_BUCKET_NAME=${GCS_BUCKET};ENVIRONMENT=production;CORS_ORIGINS=${CORS_ORIGINS_VALUE}" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=4 \

@@ -17,7 +17,6 @@ configure_logging()
 async def lifespan(app: FastAPI):
     yield
     # Cierra el cliente httpx de PokéAPI de forma ordenada al apagar la app
-    # Test CICD
     await get_pokeapi_client().aclose()
 
 

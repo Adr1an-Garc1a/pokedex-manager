@@ -118,3 +118,49 @@ services update-traffic ... --to-revisions=<revision-anterior>=100`).
   en la lista la borra silenciosamente en el próximo deploy. Si en el
   futuro agregas una variable de entorno nueva al backend, agrégala a las
   DOS listas (el script manual y el de CI/CD), no solo a una.
+
+- **Un mismo servicio de Cloud Run puede tener más de una URL "oficial"
+  válida al mismo tiempo.** Se detectó en este proyecto que
+  `gcloud run services describe --format='value(status.url)'` puede
+  devolver una URL con formato legado
+  (`https://servicio-xxxxxx-uc.a.run.app`) distinta a la URL con formato
+  nuevo (`https://servicio-<numero-de-proyecto>.<region>.run.app`) que
+  reporta el propio `gcloud run deploy` al terminar, y que es la que
+  realmente usa el navegador como `Origin`. Ambas apuntan al mismo
+  servicio, pero si `CORS_ORIGINS` solo tiene una de las dos, el navegador
+  bloquea el login por CORS aunque el backend esté sano.
+
+  La solución, en `infra/gcp/lib-service-urls.sh` (usado por
+  `ci-deploy-backend.sh` y `08-deploy-backend.sh`): en vez de confiar en un
+  solo campo de `describe`, se piden **todas** las URLs que Cloud Run
+  reconoce para el servicio del frontend
+  (`metadata.annotations['run.googleapis.com/urls']`, que trae los dos
+  formatos) y se incluyen todas, separadas por coma, en `CORS_ORIGINS` —
+  `cors_origins_list` en `config.py` ya soporta múltiples orígenes
+  separados por coma. Así no hace falta adivinar cuál de las dos formas es
+  "la correcta" para tu proyecto.
+
+  Si necesitas un arreglo inmediato sin esperar al próximo deploy (por
+  ejemplo, mientras el pipeline de CI/CD corre de nuevo), puedes actualizar
+  la variable a mano con `--update-env-vars` (que sí es aditivo, no borra
+  el resto):
+
+  ```bash
+  gcloud run services update pokedex-manager-backend \
+    --project=tu-proyecto-gcp \
+    --region=us-central1 \
+    --update-env-vars="^;^CORS_ORIGINS=https://pokedex-manager-frontend-472849722290.us-central1.run.app,https://pokedex-manager-frontend-ekqxmkc4rq-uc.a.run.app"
+  ```
+
+  Nota el prefijo **`^;^`** al inicio del valor — es importante, no es un
+  error de copiado. `--update-env-vars` (y `--set-env-vars`) separan pares
+  `KEY=VALOR` por coma de forma predeterminada, pero aquí el propio VALOR
+  de `CORS_ORIGINS` contiene comas (porque tiene dos URLs adentro). Sin ese
+  prefijo, `gcloud` corta el string en cada coma y falla con
+  `Bad syntax for dict arg` porque el segundo pedazo
+  (`https://pokedex-manager-frontend-ekqxmkc4rq-uc.a.run.app`) no tiene un
+  `=`. El prefijo `^;^` le dice a `gcloud` "usa `;` como separador entre
+  variables, no `,`", así las comas de adentro del valor quedan intactas
+  (documentado en `gcloud topic escaping`). Por la misma razón,
+  `ci-deploy-backend.sh` y `08-deploy-backend.sh` usan
+  `--set-env-vars="^;^..."` en vez de `--set-env-vars="..."` a secas.

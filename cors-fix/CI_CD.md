@@ -149,5 +149,18 @@ services update-traffic ... --to-revisions=<revision-anterior>=100`).
   gcloud run services update pokedex-manager-backend \
     --project=tu-proyecto-gcp \
     --region=us-central1 \
-    --update-env-vars="CORS_ORIGINS=https://pokedex-manager-frontend-472849722290.us-central1.run.app,https://pokedex-manager-frontend-ekqxmkc4rq-uc.a.run.app"
+    --update-env-vars="^;^CORS_ORIGINS=https://pokedex-manager-frontend-472849722290.us-central1.run.app,https://pokedex-manager-frontend-ekqxmkc4rq-uc.a.run.app"
   ```
+
+  Nota el prefijo **`^;^`** al inicio del valor — es importante, no es un
+  error de copiado. `--update-env-vars` (y `--set-env-vars`) separan pares
+  `KEY=VALOR` por coma de forma predeterminada, pero aquí el propio VALOR
+  de `CORS_ORIGINS` contiene comas (porque tiene dos URLs adentro). Sin ese
+  prefijo, `gcloud` corta el string en cada coma y falla con
+  `Bad syntax for dict arg` porque el segundo pedazo
+  (`https://pokedex-manager-frontend-ekqxmkc4rq-uc.a.run.app`) no tiene un
+  `=`. El prefijo `^;^` le dice a `gcloud` "usa `;` como separador entre
+  variables, no `,`", así las comas de adentro del valor quedan intactas
+  (documentado en `gcloud topic escaping`). Por la misma razón,
+  `ci-deploy-backend.sh` y `08-deploy-backend.sh` usan
+  `--set-env-vars="^;^..."` en vez de `--set-env-vars="..."` a secas.

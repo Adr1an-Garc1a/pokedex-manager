@@ -45,12 +45,29 @@ ve a la respuesta (**Response**) y copia el campo `"access_token"`.
 1. Abre Postman → **New** → **Collection** → nómbrala `PokéDex Manager API`.
 2. Click en la colección → pestaña **Variables** → agrega:
    - `base_url` = `http://localhost:8000/api/v1` (si corres local con Docker
-     Compose) o la URL de Cloud Run + `/api/v1` (si desplegaste en GCP, la
-     encuentras en `infra/gcp/.last-backend-url`).
+     Compose) o la URL del **backend** en Cloud Run + `/api/v1` (si
+     desplegaste en GCP, la encuentras en `infra/gcp/.last-backend-url`, o
+     con `gcloud run services describe pokedex-manager-backend
+     --region=us-central1 --format='value(status.url)'`).
    - `token` = el JWT que copiaste en el paso 1.
 3. Pestaña **Authorization** de la colección → Type: **Bearer Token** → Token:
    `{{token}}`. Así todas las requests de la colección heredan el header
    `Authorization: Bearer <token>` automáticamente, sin repetirlo en cada una.
+
+> ⚠️ **Error muy común: usar la URL del FRONTEND en `base_url`.** El
+> proyecto tiene dos servicios en Cloud Run — `pokedex-manager-backend`
+> (la API) y `pokedex-manager-frontend` (la página web) — y es fácil
+> copiar la que no es. Si `base_url` apunta al frontend por error, **todas
+> las requests de esta guía van a responder `200 OK` con el HTML de la
+> página** (no un error visible, así que puede pasar desapercibido) en vez
+> del JSON de la API — esto pasa porque el frontend sirve `index.html`
+> para cualquier ruta desconocida, sea GET, POST, PUT o DELETE (es una SPA
+> de React). **Cómo verificarlo:** después de configurar `base_url`, haz
+> el GET de la sección 4.1 y mira la pestaña **Body** de la respuesta — si
+> ves un objeto/array JSON, vas bien; si ves `<!DOCTYPE html>` o
+> `<div id="root">`, `base_url` está apuntando al servicio equivocado
+> (revisa también el `Content-Type` en la pestaña **Headers** de la
+> respuesta: debe ser `application/json`, no `text/html`).
 
 ## 3. Requests de solo lectura (catálogo PokéAPI, no requieren tu colección)
 
@@ -145,6 +162,7 @@ navegador). La forma práctica de verlo:
 
 | Respuesta | Causa | Solución |
 |---|---|---|
+| `200 OK` pero el Body es HTML (`<!DOCTYPE html>...`), no JSON — en cualquier request, incluido POST/PUT/DELETE | `base_url` apunta al servicio de **frontend** en vez del **backend** | Corrige la variable `base_url` de la colección (ver advertencia de la sección 2) — debe ser la URL de `pokedex-manager-backend` + `/api/v1` |
 | `401 Unauthorized` | Falta el token, expiró, o no configuraste el Bearer Token en la colección | Repite el paso 1 y revisa la pestaña Authorization |
 | `404` en `/collection/<id>` | Ese `id` no existe o pertenece a otro usuario | Verifica con `GET /collection` cuáles son tus IDs reales |
 | `404` en `/pokemon/<algo>` | El nombre/ID no existe en PokéAPI | Revisa la ortografía (en inglés, ej. `charizard` no `charizar`) |
