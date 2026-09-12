@@ -109,3 +109,12 @@ services update-traffic ... --to-revisions=<revision-anterior>=100`).
   Run siempre lee `:latest` de Secret Manager en cada deploy.
 - Para desactivar el CI/CD temporalmente sin borrarlo: en Cloud Build →
   Triggers, usa el switch para deshabilitar el trigger.
+- **`--set-env-vars` reemplaza TODAS las variables de entorno del servicio
+  en cada deploy** (no es aditivo) — a diferencia de `--update-env-vars`,
+  que solo toca las que le pasas. `ci-deploy-backend.sh` y
+  `08-deploy-backend.sh` ya incluyen explícitamente todas las variables que
+  necesita el backend (incluida `CORS_ORIGINS`, auto-detectada desde el
+  servicio de frontend) precisamente por esto: olvidar una sola variable
+  en la lista la borra silenciosamente en el próximo deploy. Si en el
+  futuro agregas una variable de entorno nueva al backend, agrégala a las
+  DOS listas (el script manual y el de CI/CD), no solo a una.

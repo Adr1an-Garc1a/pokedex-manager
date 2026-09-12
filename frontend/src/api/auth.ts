@@ -1,4 +1,4 @@
-import { apiClient } from "@/api/client";
+import { API_BASE_URL, apiClient } from "@/api/client";
 import type { GoogleProfilePreview, User } from "@/types";
 import { AxiosError } from "axios";
 
@@ -36,9 +36,47 @@ interface BackendErrorDetail {
 
 function extractDetail(error: unknown): BackendErrorDetail | undefined {
   if (error instanceof AxiosError) {
-    return error.response?.data?.detail as BackendErrorDetail | undefined;
+    const raw = error.response?.data?.detail;
+    // FastAPI a veces manda detail como string plano (ej. errores 500 sin
+    // manejar) en vez del objeto {code, message, ...} que usan nuestros
+    // endpoints de auth. Normalizamos para no romper el resto del código.
+    if (typeof raw === "string") {
+      return { message: raw };
+    }
+    return raw as BackendErrorDetail | undefined;
   }
   return undefined;
+}
+
+/** Convierte cualquier error de axios en un mensaje legible para mostrar en
+ * la UI, en vez de un "no se pudo iniciar sesión" genérico que no dice nada
+ * sobre la causa real (backend caído, CORS bloqueado, 500, etc.). */
+export function describeAuthError(error: unknown): string {
+  if (error instanceof AxiosError) {
+    if (!error.response) {
+      // Axios nunca recibió respuesta: red caída, backend no disponible, o
+      // el navegador bloqueó la respuesta por CORS (el caso más común: el
+      // backend no tiene el origen del frontend en CORS_ORIGINS). En
+      // cualquiera de los dos casos el navegador no expone el detalle
+      // exacto a JavaScript por seguridad, así que mostramos ambas
+      // hipótesis para que sea fácil de diagnosticar.
+      return (
+        `No se pudo conectar con el backend en ${API_BASE_URL}. ` +
+        "Puede ser que el servicio esté caído, o que esté bloqueando " +
+        "el origen del frontend por CORS (revisa la consola del navegador: " +
+        "si dice 'blocked by CORS policy', hay que actualizar CORS_ORIGINS " +
+        "en el backend con la URL real del frontend)."
+      );
+    }
+
+    const detail = extractDetail(error);
+    if (detail?.message) {
+      return `El backend respondió ${error.response.status}: ${detail.message}`;
+    }
+    return `El backend respondió con un error inesperado (${error.response.status}).`;
+  }
+
+  return "Ocurrió un error inesperado. Revisa la consola del navegador.";
 }
 
 /** Inicia sesión con una cuenta de Google YA REGISTRADA.

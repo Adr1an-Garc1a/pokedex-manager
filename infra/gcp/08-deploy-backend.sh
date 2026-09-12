@@ -17,7 +17,19 @@ BACKEND_IMAGE="$(cat .last-backend-image)"
 CONNECTION_NAME="$(gcloud sql instances describe "${SQL_INSTANCE}" \
   --project="${PROJECT_ID}" --format="value(connectionName)")"
 
+# IMPORTANTE: `gcloud run deploy --set-env-vars` REEMPLAZA TODAS las
+# variables de entorno del servicio en cada deploy (no es aditivo). Si no
+# pasas FRONTEND_URL explícitamente, se autodetecta la URL del frontend ya
+# desplegado (si existe) en vez de caer silenciosamente a "*" y perder el
+# valor correcto en cada redeploy.
+if [[ -z "${FRONTEND_URL:-}" ]]; then
+  FRONTEND_URL="$(gcloud run services describe "${FRONTEND_SERVICE}" \
+    --project="${PROJECT_ID}" --region="${REGION}" --format="value(status.url)" 2>/dev/null || true)"
+fi
+CORS_ORIGINS_VALUE="${FRONTEND_URL:-*}"
+
 echo ">> Desplegando backend en Cloud Run: ${BACKEND_SERVICE}"
+echo "   CORS_ORIGINS = ${CORS_ORIGINS_VALUE}"
 gcloud run deploy "${BACKEND_SERVICE}" \
   --project="${PROJECT_ID}" \
   --region="${REGION}" \
@@ -25,7 +37,7 @@ gcloud run deploy "${BACKEND_SERVICE}" \
   --service-account="${RUNTIME_SA_EMAIL}" \
   --add-cloudsql-instances="${CONNECTION_NAME}" \
   --set-secrets="DATABASE_URL=${SECRET_DB_URL}:latest,JWT_SECRET_KEY=${SECRET_JWT_KEY}:latest,GOOGLE_CLIENT_ID=${SECRET_GOOGLE_CLIENT_ID}:latest" \
-  --set-env-vars="STORAGE_BACKEND=gcs,GCS_BUCKET_NAME=${GCS_BUCKET},ENVIRONMENT=production,CORS_ORIGINS=${FRONTEND_URL:-*}" \
+  --set-env-vars="STORAGE_BACKEND=gcs,GCS_BUCKET_NAME=${GCS_BUCKET},ENVIRONMENT=production,CORS_ORIGINS=${CORS_ORIGINS_VALUE}" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=4 \

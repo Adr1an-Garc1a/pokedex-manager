@@ -1,4 +1,4 @@
-import { UserNotRegisteredError } from "@/api/auth";
+import { describeAuthError, UserAlreadyRegisteredError, UserNotRegisteredError } from "@/api/auth";
 import { useAuth } from "@/context/AuthContext";
 import type { GoogleProfilePreview } from "@/types";
 import { GoogleLogin } from "@react-oauth/google";
@@ -36,7 +36,10 @@ export function LoginPage() {
         setPendingProfile(err.profile);
         setDisplayName(err.profile.name);
       } else {
-        setError("No se pudo iniciar sesión. Intenta de nuevo.");
+        // Mostramos el motivo real (red/CORS/backend) en vez de un mensaje
+        // genérico, para poder diagnosticar sin tener que abrir DevTools.
+        setError(describeAuthError(err));
+        console.error("Fallo en /auth/google/login:", err);
       }
     });
   }
@@ -48,7 +51,16 @@ export function LoginPage() {
     setError(null);
     setIsSubmitting(true);
     registerWithGoogleIdToken(pendingIdToken, displayName.trim() || (pendingProfile?.name ?? ""))
-      .catch(() => setError("No se pudo completar el registro. Intenta de nuevo."))
+      .catch((err) => {
+        if (err instanceof UserAlreadyRegisteredError) {
+          setError("Esta cuenta ya está registrada. Vuelve a intentar iniciar sesión.");
+          setPendingIdToken(null);
+          setPendingProfile(null);
+          return;
+        }
+        setError(describeAuthError(err));
+        console.error("Fallo en /auth/google/register:", err);
+      })
       .finally(() => setIsSubmitting(false));
   }
 
