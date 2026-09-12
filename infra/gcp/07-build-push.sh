@@ -29,17 +29,19 @@ echo ">> Construyendo y publicando imagen del frontend con Cloud Build..."
 # de correr 08-deploy-backend.sh.
 BACKEND_URL="${BACKEND_URL:-https://REEMPLAZA-DESPUES-DE-DESPLEGAR-BACKEND}"
 
-gcloud builds submit "${REPO_ROOT}/frontend" \
-  --project="${PROJECT_ID}" \
-  --tag="${FRONTEND_IMAGE}" \
-  --substitutions=_VITE_API_BASE_URL="${BACKEND_URL}/api/v1",_VITE_GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
-  --config=<(cat <<EOF
+# gcloud no permite combinar --tag con --config, así que el tag de la imagen
+# va dentro del propio archivo de config (no como flag aparte). Se escribe a
+# un archivo temporal real (más confiable que una sustitución de procesos
+# <(...) con gcloud) y los valores de build-arg se interpolan directamente
+# aquí en bash, sin depender del mecanismo de --substitutions de Cloud Build.
+CLOUDBUILD_CONFIG="$(mktemp /tmp/pokedex-frontend-cloudbuild.XXXXXX.yaml)"
+cat > "${CLOUDBUILD_CONFIG}" <<EOF
 steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - build
-      - --build-arg=VITE_API_BASE_URL=\${_VITE_API_BASE_URL}
-      - --build-arg=VITE_GOOGLE_CLIENT_ID=\${_VITE_GOOGLE_CLIENT_ID}
+      - --build-arg=VITE_API_BASE_URL=${BACKEND_URL}/api/v1
+      - --build-arg=VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - --target=production
       - -t
       - ${FRONTEND_IMAGE}
@@ -47,7 +49,12 @@ steps:
 images:
   - '${FRONTEND_IMAGE}'
 EOF
-)
+
+gcloud builds submit "${REPO_ROOT}/frontend" \
+  --project="${PROJECT_ID}" \
+  --config="${CLOUDBUILD_CONFIG}"
+
+rm -f "${CLOUDBUILD_CONFIG}"
 
 echo "${FRONTEND_IMAGE}" > .last-frontend-image
 echo "   Imagen frontend: ${FRONTEND_IMAGE}"

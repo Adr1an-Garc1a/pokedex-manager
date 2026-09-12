@@ -1,4 +1,4 @@
-import { fetchCurrentUser, loginWithGoogle } from "@/api/auth";
+import { fetchCurrentUser, loginWithGoogle, registerWithGoogle } from "@/api/auth";
 import { clearToken, getToken, saveToken } from "@/api/client";
 import type { User } from "@/types";
 import {
@@ -14,7 +14,12 @@ import {
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
+  /** Inicia sesión con una cuenta ya registrada. Lanza
+   * UserNotRegisteredError (ver api/auth.ts) si la cuenta no existe aún. */
   loginWithGoogleIdToken: (idToken: string) => Promise<void>;
+  /** Da de alta una cuenta nueva a partir del id_token de Google + el
+   * nombre confirmado/editado por el usuario en el formulario. */
+  registerWithGoogleIdToken: (idToken: string, name: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -42,14 +47,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(response.user);
   }, []);
 
+  const registerWithGoogleIdToken = useCallback(async (idToken: string, name: string) => {
+    const response = await registerWithGoogle(idToken, name);
+    saveToken(response.access_token);
+    setUser(response.user);
+  }, []);
+
   const logout = useCallback(() => {
     clearToken();
     setUser(null);
   }, []);
 
   const value = useMemo(
-    () => ({ user, isLoading, loginWithGoogleIdToken, logout }),
-    [user, isLoading, loginWithGoogleIdToken, logout]
+    () => ({ user, isLoading, loginWithGoogleIdToken, registerWithGoogleIdToken, logout }),
+    [user, isLoading, loginWithGoogleIdToken, registerWithGoogleIdToken, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

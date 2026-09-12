@@ -30,13 +30,21 @@ para cómo se resuelve la integración con la API externa.
 
 ## Funcionalidades implementadas (core)
 
-- **Autenticación**: botón "Iniciar sesión con Google", validación del
-  `id_token` en el backend, emisión de JWT propio.
-- **Integración con PokéAPI**: búsqueda y listado paginado de Pokémon, con
-  caché en el backend (ver `docs/POKEAPI_DECISION.md`).
-- **Gestión de datos y persistencia**: agregar/editar/quitar Pokémon de tu
-  colección personal (apodo, nivel, notas, favorito, imagen propia), estadísticas
-  agregadas (`/collection/stats`).
+- **Autenticación con registro obligatorio**: login y registro son endpoints
+  separados (`/auth/google/login` y `/auth/google/register`). El login
+  **nunca** crea usuarios — si la cuenta de Google no existe en la base de
+  datos, el backend responde 404 y el frontend muestra un formulario de
+  registro autocompletado con el nombre/foto de Google (editable). Solo
+  entran usuarios que completaron el registro. Ver
+  `docs/ARCHITECTURE.md#4-autenticación--flujo-login-y-registro-separados`.
+- **Integración con PokéAPI**: búsqueda y listado paginado de Pokémon
+  (solo lectura, catálogo externo), con caché en el backend (ver
+  `docs/POKEAPI_DECISION.md`).
+- **Gestión de datos y persistencia — CRUD completo de la colección**:
+  crear, leer, actualizar y borrar Pokémon de tu colección personal (apodo,
+  nivel, notas, favorito, imagen propia), estadísticas agregadas
+  (`/collection/stats`). Guía paso a paso para probar el CRUD con Postman:
+  [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md).
 - **Interfaz responsive**: mobile-first, paleta pastel azul/verde-azulado,
   tarjetas con tipos de Pokémon coloreados, spinner temático (Pokéball).
 

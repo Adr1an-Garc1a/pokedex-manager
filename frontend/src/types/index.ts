@@ -6,6 +6,14 @@ export interface User {
   created_at: string;
 }
 
+/** Datos de Google usados para autocompletar el formulario de registro,
+ * devueltos por el backend cuando detecta que la cuenta aún no existe. */
+export interface GoogleProfilePreview {
+  name: string;
+  email: string;
+  picture: string | null;
+}
+
 export interface PokemonSummary {
   id: number;
   name: string;

@@ -69,15 +69,46 @@ con Cloud SQL — todo pasa por el backend, que es el único que conoce credenci
 cachea llamadas externas y aplica reglas de negocio (por ejemplo, verificar que un
 `pokemon_id` exista antes de guardarlo en la colección).
 
-## 4. Autenticación — flujo
+## 4. Autenticación — flujo (login y registro separados)
 
+Login y registro son **dos endpoints distintos**, a propósito: el login nunca
+da de alta usuarios. Solo entra a la app quien ya existe en la tabla `users`.
+
+**Login** (`POST /api/v1/auth/google/login`):
 1. El frontend usa el botón oficial de Google Identity Services y obtiene un `id_token` (JWT firmado por Google).
-2. El frontend envía ese `id_token` a `POST /api/v1/auth/google`.
+2. El frontend envía ese `id_token` al backend.
 3. El backend lo valida contra los certificados públicos de Google (`google.oauth2.id_token.verify_oauth2_token`), verificando `aud` (Client ID) e `iss`.
-4. Si es válido, se hace *upsert* del usuario (`google_sub`, `email`, `name`, `picture`) en Postgres.
-5. El backend emite su **propio JWT de sesión** (HS256, corta duración + refresh opcional), que el frontend guarda y envía como `Authorization: Bearer <token>` en cada request subsiguiente.
+4. Busca un usuario con ese `google_sub`. **Si no existe, responde `404`** con `code: "user_not_registered"` y el perfil de Google (nombre/email/foto) — nunca crea el usuario aquí.
+5. Si existe, emite el JWT propio de sesión (HS256) y lo devuelve junto con los datos del usuario.
 
-Esto evita depender de Google en cada request y deja la puerta abierta a añadir más
+**Registro** (`POST /api/v1/auth/google/register`):
+1. El frontend, al recibir el 404 anterior, muestra un formulario ya autocompletado con el perfil de Google (nombre editable, email de solo lectura).
+2. Al confirmar, se reenvía el mismo `id_token` (se vuelve a validar contra Google, nunca se confía en datos sin firmar) junto con el nombre elegido.
+3. Si el `google_sub` ya existe, responde `409 user_already_registered` (evita duplicados por doble clic).
+4. Si no existe, crea el usuario y emite el JWT de sesión, igual que el login.
+
+```mermaid
+sequenceDiagram
+    participant F as Frontend
+    participant B as Backend
+    participant G as Google
+
+    F->>G: Google Sign-In
+    G-->>F: id_token
+    F->>B: POST /auth/google/login {id_token}
+    alt usuario ya registrado
+        B-->>F: 200 {access_token, user}
+    else no registrado
+        B-->>F: 404 {code: user_not_registered, profile}
+        F->>F: muestra formulario autocompletado
+        F->>B: POST /auth/google/register {id_token, name}
+        B-->>F: 201 {access_token, user}
+    end
+```
+
+El JWT propio de sesión se guarda en el frontend y se envía como
+`Authorization: Bearer <token>` en cada request subsiguiente. Esto evita
+depender de Google en cada request y deja la puerta abierta a añadir más
 proveedores de login en el futuro sin cambiar el resto del sistema.
 
 ## 5. Modelo de datos (v1)

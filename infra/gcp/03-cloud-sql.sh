@@ -15,9 +15,14 @@ if gcloud sql instances describe "${SQL_INSTANCE}" --project="${PROJECT_ID}" >/d
   echo "   Ya existe, se omite creación de la instancia."
 else
   echo ">> Creando instancia Cloud SQL (PostgreSQL 16, tier ${SQL_TIER})... esto puede tardar varios minutos."
+  # --edition=ENTERPRISE es necesario para poder usar tiers "shared-core"
+  # baratos como db-f1-micro: los proyectos nuevos de GCP a veces quedan con
+  # la edición ENTERPRISE_PLUS por defecto, que no admite esos tiers y exige
+  # tiers db-perf-optimized-N-* (mucho más caros, pensados para producción).
   gcloud sql instances create "${SQL_INSTANCE}" \
     --project="${PROJECT_ID}" \
     --database-version=POSTGRES_16 \
+    --edition=ENTERPRISE \
     --tier="${SQL_TIER}" \
     --region="${SQL_REGION}" \
     --storage-auto-increase \
