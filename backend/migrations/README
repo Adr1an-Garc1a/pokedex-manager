@@ -1,0 +1,8 @@
+Migraciones generadas y mantenidas con Alembic.
+
+Comandos útiles (ejecutar dentro de backend/, con el venv activo o dentro del
+contenedor):
+
+  alembic revision --autogenerate -m "descripcion del cambio"
+  alembic upgrade head
+  alembic downgrade -1
