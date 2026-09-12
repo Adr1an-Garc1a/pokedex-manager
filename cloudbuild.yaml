@@ -1,0 +1,93 @@
+# =============================================================================
+# cloudbuild.yaml — Pipeline de CI/CD para PokéDex Manager.
+#
+# Disparado automáticamente por un Cloud Build Trigger conectado a GitHub
+# (ver docs/CI_CD.md para cómo conectarlo, una sola vez). Cada push a `main`
+# hace: build backend -> deploy backend -> build frontend (con la URL real
+# del backend) -> deploy frontend.
+#
+# Las variables _XXX son sustituciones: sus valores reales se configuran al
+# crear el trigger (Console o `gcloud builds triggers create`), no aquí.
+# Los valores de abajo son solo placeholders/documentación.
+# =============================================================================
+
+substitutions:
+  _REGION: us-central1
+  _ARTIFACT_REPO: pokedex-manager-repo
+  _BACKEND_SERVICE: pokedex-manager-backend
+  _FRONTEND_SERVICE: pokedex-manager-frontend
+  _SQL_INSTANCE: pokedex-manager-db
+  _GCS_BUCKET: REEMPLAZA-EN-EL-TRIGGER
+  _RUNTIME_SA_EMAIL: REEMPLAZA-EN-EL-TRIGGER
+  _BACKEND_URL: REEMPLAZA-EN-EL-TRIGGER
+  _GOOGLE_CLIENT_ID: REEMPLAZA-EN-EL-TRIGGER
+  _SECRET_DB_URL: pokedex-manager-database-url
+  _SECRET_JWT_KEY: pokedex-manager-jwt-secret
+  _SECRET_GOOGLE_CLIENT_ID: pokedex-manager-google-client-id
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # --- Backend ---
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+      - ./backend
+
+  - id: push-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+
+  - id: deploy-backend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args: ["infra/gcp/ci-deploy-backend.sh"]
+    env:
+      - "PROJECT_ID=$PROJECT_ID"
+      - "REGION=${_REGION}"
+      - "BACKEND_SERVICE=${_BACKEND_SERVICE}"
+      - "IMAGE=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+      - "SQL_INSTANCE=${_SQL_INSTANCE}"
+      - "RUNTIME_SA_EMAIL=${_RUNTIME_SA_EMAIL}"
+      - "GCS_BUCKET=${_GCS_BUCKET}"
+      - "SECRET_DB_URL=${_SECRET_DB_URL}"
+      - "SECRET_JWT_KEY=${_SECRET_JWT_KEY}"
+      - "SECRET_GOOGLE_CLIENT_ID=${_SECRET_GOOGLE_CLIENT_ID}"
+
+  # --- Frontend (necesita la URL del backend en build-time, la incrusta Vite) ---
+  - id: build-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=VITE_API_BASE_URL=${_BACKEND_URL}/api/v1
+      - --build-arg=VITE_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}
+      - --target=production
+      - -t
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
+      - ./frontend
+
+  - id: push-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
+
+  - id: deploy-frontend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args: ["infra/gcp/ci-deploy-frontend.sh"]
+    env:
+      - "PROJECT_ID=$PROJECT_ID"
+      - "REGION=${_REGION}"
+      - "FRONTEND_SERVICE=${_FRONTEND_SERVICE}"
+      - "IMAGE=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
+
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"

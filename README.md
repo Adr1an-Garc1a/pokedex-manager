@@ -125,6 +125,19 @@ export PROJECT_ID=tu-proyecto-gcp
   && ./07-build-push.sh && ./08-deploy-backend.sh && ./09-deploy-frontend.sh
 ```
 
+### CI/CD — desplegar automáticamente en cada push
+
+Por defecto lo anterior es manual. Si quieres que un `git push` a `main`
+dispare el build y el deploy solo (sin guardar llaves de service account en
+GitHub), sigue [`docs/CI_CD.md`](docs/CI_CD.md) — usa Cloud Build Triggers
+conectado directo a tu repo.
+
+### ¿Ya desplegaste antes y solo actualizaste el código?
+
+Ver [`docs/MANUAL_EJECUCION.md`](docs/MANUAL_EJECUCION.md) para el manual
+completo de cómo correr esta versión (local y actualizando un despliegue de
+GCP que ya existía).
+
 ## Estructura del repositorio
 
 ```
