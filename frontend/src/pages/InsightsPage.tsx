@@ -37,7 +37,7 @@ function PokemonSprite({
 export function InsightsPage() {
   const { user } = useAuth();
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ["ai", "insights", user?.id],
     queryFn: getCollectionInsights,
     enabled: !!user,
@@ -62,6 +62,21 @@ export function InsightsPage() {
         </p>
       </div>
 
+      {!isLoading && (
+        <div className="mb-6 flex flex-col items-center gap-1">
+          <button
+            className="poke-btn-secondary text-sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+          >
+            {isFetching ? "Actualizando insights..." : "🔄 Actualizar insights"}
+          </button>
+          <p className="text-xs text-poke-ink-soft">
+            ¿Cambiaste tu equipo en Mi Colección? Dale aquí para recalcular el análisis.
+          </p>
+        </div>
+      )}
+
       {isLoading && (
         <PokeballSpinner label="Espera un momento, entrenador/a... entendiendo tu equipo de Pokémon, ¡ya casi los cazas a todos! 🎯" />
       )}
@@ -73,7 +88,7 @@ export function InsightsPage() {
       )}
 
       {data && (
-        <div className="flex flex-col gap-6">
+        <div className={`flex flex-col gap-6 transition-opacity ${isFetching ? "opacity-50" : ""}`}>
           <Section title="🐾 Tu equipo analizado">
             <div className="flex flex-wrap gap-3">
               {data.analyzed_team.map((member, i) => (

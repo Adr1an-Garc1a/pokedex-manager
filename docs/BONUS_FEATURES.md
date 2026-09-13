@@ -103,10 +103,22 @@ necesidad real para esta app. En su lugar, por cada mensaje de chat:
 
 1. Se construye un servidor MCP (`FastMCP`, SDK oficial `mcp`) con tools ya
    "cerradas" sobre el usuario que está chateando y la sesión de base de
-   datos de ese request: `list_my_collection`, `get_collection_stats`,
+   datos de ese request: `list_my_collection` (toda la colección),
+   `get_my_team` (el equipo efectivo, hasta 6 — ver
+   [Elegir el equipo a mano](#elegir-el-equipo-a-mano)), `get_collection_stats`,
    `get_pokemon_info`. El servidor no puede leer la colección de otro
    usuario — ni el modelo puede pedírselo pasando un id, porque las tools no
    reciben `user_id` como parámetro.
+
+   `list_my_collection` y `get_my_team` son deliberadamente dos tools
+   separadas: "colección" y "equipo" no son lo mismo (colección = todo lo
+   que tiene, equipo = un subconjunto de hasta 6), y antes de separarlas el
+   modelo confundía ambos conceptos — por ejemplo, respondía sobre
+   favoritos cuando se le preguntaba por "mi equipo". El system prompt
+   (`chat.py`) instruye explícitamente a Claude a usar `get_my_team` (nunca
+   a adivinar el equipo a partir de `list_my_collection`) para cualquier
+   pregunta sobre el equipo actual — así el chat siempre refleja el mismo
+   equipo que ve Insights, incluso justo después de cambiarlo.
 2. Se conecta un `ClientSession` MCP real a ese servidor con streams **en
    memoria** (`mcp.shared.memory`, el mismo mecanismo que usa el propio SDK
    `mcp` en sus tests) — el mismo protocolo JSON-RPC de MCP, sin la capa de
@@ -304,8 +316,15 @@ En el frontend (`CollectionPage.tsx`), el botón "Hacer de mi equipo" solo
 aparece cuando la colección tiene más de 6 Pokémon — con 6 o menos, el
 equipo siempre es toda la colección, así que no hay nada que elegir. Al
 guardar un equipo nuevo se invalida también la query de Insights (misma
-cuenta), así el próximo análisis usa el equipo recién elegido sin necesidad
-de recargar la página.
+cuenta), así si el usuario vuelve a esa sección ve el análisis recalculado
+automáticamente.
+
+Insights, además, no se recalcula solo mientras la página sigue abierta —
+si el usuario ya vio su análisis y después cambia de equipo sin salir de
+"Insights" (o simplemente quiere una segunda opinión), el botón
+**"🔄 Actualizar insights"** en `InsightsPage.tsx` fuerza un nuevo `refetch()`
+de React Query bajo la misma `queryKey`, sin depender de que la query se
+vuelva a montar.
 
 ## Aislamiento entre cuentas
 

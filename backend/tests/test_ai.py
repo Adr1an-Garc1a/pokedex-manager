@@ -455,6 +455,74 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_run_pokedex_chat_get_my_team_tool_reflects_hand_picked_team(monkeypatch):
+    """El chat debe poder distinguir 'colección' (todo) de 'equipo' (hasta 6,
+    elegido a mano o por defecto) — ver get_my_team en mcp_tools.py. Este test
+    arma una colección de 8 Pokémon, elige 3 a mano como equipo, y confirma
+    que la tool le devuelve a Claude ESOS 3, no los 8 ni los primeros 6."""
+    from app.db.session import SessionLocal
+    from app.models.collection import CollectionEntry
+    from app.models.user import User
+
+    db = SessionLocal()
+    user = User(google_sub="sub-chat-team", email="chatteam@example.com", name="Chat Equipo")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    chosen_names = {"pinsir", "scyther", "kabuto"}
+    for i, name in enumerate(
+        ["bulbasaur", "charmander", "squirtle", "pinsir", "scyther", "kabuto", "omanyte", "aerodactyl"]
+    ):
+        db.add(
+            CollectionEntry(
+                user_id=user.id,
+                pokemon_id=100 + i,
+                pokemon_name=name,
+                types=["normal"],
+                is_team_member=name in chosen_names,
+            )
+        )
+    db.commit()
+
+    _FakeAsyncAnthropic._shared_responses = [
+        _FakeMessage(content=[_FakeToolUseBlock(id="tool-1", name="get_my_team", input={})]),
+        _FakeMessage(content=[_FakeTextBlock("¡Tu equipo se ve sólido!")]),
+    ]
+    monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
+    monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
+
+    async def fake_get_thread(user_id, thread_id):
+        return {}
+
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
+        return [
+            {"role": "user", "content": user_message, "ts": "now"},
+            {"role": "assistant", "content": assistant_reply, "ts": "now"},
+        ]
+
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
+    monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
+
+    reply, _, _, _ = await chat_module.run_pokedex_chat(
+        db=db, user=user, user_message="¿cuál es mi equipo?"
+    )
+    assert "sólido" in reply
+
+    # El segundo create_calls[1] es el que ya incluye el tool_result con lo
+    # que devolvió get_my_team — se confirma que trae solo los 3 elegidos.
+    second_call = _FakeAsyncAnthropic.last_instance.messages.create_calls[1]
+    tool_result_message = second_call["messages"][-1]
+    tool_result_text = str(tool_result_message["content"])
+    for name in chosen_names:
+        assert name in tool_result_text
+    for name in ["bulbasaur", "charmander", "squirtle", "omanyte", "aerodactyl"]:
+        assert name not in tool_result_text
+
+    db.close()
+
+
+@pytest.mark.asyncio
 async def test_run_pokedex_chat_handles_thinking_blocks(monkeypatch):
     """Regresión del bug real reportado en producción: la respuesta de Claude
     Sonnet 5 traía un bloque `thinking` junto al `tool_use`, y reconstruir el

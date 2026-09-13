@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.models.collection import CollectionEntry
 from app.models.user import User
 from app.services.pokeapi_client import get_pokeapi_client
+from app.services.team import get_effective_team
 
 
 def build_mcp_server(*, db: Session, user: User) -> FastMCP:
@@ -40,8 +41,11 @@ def build_mcp_server(*, db: Session, user: User) -> FastMCP:
 
     @server.tool(
         description=(
-            "Lista todos los Pokémon en la colección personal del usuario actual, "
-            "con su apodo, nivel, tipos, si es favorito y sus notas."
+            "Lista TODOS los Pokémon en la colección personal del usuario actual, "
+            "con su apodo, nivel, tipos, si es favorito, si es parte de su equipo "
+            "actual (is_team_member) y sus notas. Para preguntas específicamente "
+            "sobre 'mi equipo' usa mejor la tool get_my_team, que ya filtra "
+            "exactamente cuáles son."
         )
     )
     async def list_my_collection() -> list[dict]:
@@ -56,10 +60,50 @@ def build_mcp_server(*, db: Session, user: User) -> FastMCP:
                 "types": e.types,
                 "level": e.level,
                 "is_favorite": e.is_favorite,
+                "is_team_member": e.is_team_member,
                 "notes": e.notes,
             }
             for e in entries
         ]
+
+    @server.tool(
+        description=(
+            "Devuelve el EQUIPO actual del usuario (hasta 6 Pokémon) — la misma "
+            "información que ya usa la sección de Insights de la app. Si el usuario "
+            "eligió un equipo a mano en 'Mi Colección' (botón 'Hacer de mi equipo'), "
+            "son esos; si no ha elegido ninguno todavía, son los primeros 6 Pokémon "
+            "que agregó a su colección. Usa SIEMPRE esta tool (no list_my_collection) "
+            "cuando el usuario pregunte por 'mi equipo', 'mi equipo actual', si puede "
+            "'pasar el juego con este equipo', o cualquier variante — nunca asumas ni "
+            "adivines cuál es el equipo a partir de los favoritos u otra señal."
+        )
+    )
+    async def get_my_team() -> dict:
+        def _load_team() -> list[CollectionEntry]:
+            return get_effective_team(db, user.id)
+
+        team = await asyncio.to_thread(_load_team)
+        chosen_by_hand = any(e.is_team_member for e in team)
+        return {
+            "team_was_chosen_by_user": chosen_by_hand,
+            "note": (
+                "Este equipo lo eligió el usuario a mano."
+                if chosen_by_hand
+                else "El usuario no ha elegido un equipo a mano todavía — estos son "
+                "los primeros Pokémon que agregó a su colección, usados por defecto."
+            ),
+            "team": [
+                {
+                    "id": e.id,
+                    "pokemon_name": e.pokemon_name,
+                    "nickname": e.nickname,
+                    "types": e.types,
+                    "level": e.level,
+                    "is_favorite": e.is_favorite,
+                }
+                for e in team
+            ],
+        }
 
     @server.tool(
         description=(
