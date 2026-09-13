@@ -241,6 +241,16 @@ export function PokedexChatPage() {
         >
           {newThreadMutation.isPending ? "Creando..." : "➕ Iniciar nueva conversación"}
         </button>
+        {newThreadMutation.isError && (
+          <p className="text-xs text-poke-coral">
+            No se pudo crear la conversación: {getErrorMessage(newThreadMutation.error)}
+          </p>
+        )}
+        {deleteThreadMutation.isError && (
+          <p className="text-xs text-poke-coral">
+            No se pudo eliminar la conversación: {getErrorMessage(deleteThreadMutation.error)}
+          </p>
+        )}
 
         <div className="poke-card flex max-h-[50vh] flex-col gap-1 overflow-y-auto p-2 md:max-h-[55vh]">
           <p className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-poke-ink-soft">

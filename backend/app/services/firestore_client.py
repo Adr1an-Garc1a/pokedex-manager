@@ -99,7 +99,24 @@ async def get_thread_messages(user_id: int, thread_id: str) -> list[dict]:
 
 
 async def create_thread(user_id: int) -> dict:
-    """Crea una conversación nueva y vacía — 'Iniciar nueva conversación'."""
+    """Crea una conversación nueva y vacía — 'Iniciar nueva conversación'.
+
+    A propósito **best effort** (nunca lanza, a diferencia de la primera
+    versión de esta función): una conversación recién creada no tiene NINGÚN
+    mensaje todavía, así que no hay nada que perder si el guardado en
+    Firestore falla en este momento — el `thread_id` se genera y se devuelve
+    igual, y la conversación se termina de crear "de verdad" en Firestore la
+    primera vez que se le manda un mensaje (`append_turn`, más abajo, ya crea
+    la entrada si no la encuentra — el mismo mecanismo de autocuración que el
+    resto del chat).
+
+    Bug real reportado: antes, si Firestore fallaba acá, se lanzaba un 503 —
+    y como el frontend no mostraba ningún error para esta acción puntual (a
+    diferencia de enviar un mensaje), el botón "Iniciar nueva conversación"
+    simplemente parecía no hacer nada en absoluto. Con esto, la acción
+    siempre funciona del lado del usuario, sin importar el estado de
+    Firestore en ese instante.
+    """
     now = datetime.now(timezone.utc).isoformat()
     thread_id = uuid.uuid4().hex
     thread_data = {"title": "Nueva conversación", "messages": [], "created_at": now, "updated_at": now}
@@ -110,12 +127,12 @@ async def create_thread(user_id: int) -> dict:
         threads = snapshot.to_dict().get("threads", {}) if snapshot.exists else {}
         threads[thread_id] = thread_data
         await doc_ref.set({"threads": threads})
-    except Exception as exc:
-        logger.exception("No se pudo crear la conversación de chat en Firestore")
-        raise HTTPException(
-            status_code=503,
-            detail=f"No se pudo iniciar la conversación (Firestore no disponible). Detalle técnico: {exc}",
-        ) from exc
+    except Exception:
+        logger.warning(
+            "No se pudo crear la conversación en Firestore de inmediato — se creará sola "
+            "en cuanto se le mande el primer mensaje (autocuración de append_turn)",
+            exc_info=True,
+        )
     return {"id": thread_id, "message_count": 0, **{k: thread_data[k] for k in ("title", "created_at", "updated_at")}}
 
 

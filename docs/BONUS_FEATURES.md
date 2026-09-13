@@ -277,6 +277,34 @@ incluso cerrando sesión.** Este era un bug real de FRONTEND, no de
 Firestore — ver la sección de Vision más abajo ("Por qué el aviso 'no
 guardado' se quedaba pegado") para el detalle completo.
 
+**5. "Iniciar nueva conversación" parecía no hacer nada cuando Firestore
+estaba fallando.** `POST /ai/chat/threads` (crear una conversación) escribía
+a Firestore igual que guardar un turno de chat, pero a diferencia de
+enviar un mensaje, el frontend no mostraba ningún aviso de error para esta
+acción puntual — así que si ese guardado fallaba (el mismo problema de
+permisos de abajo), la petición sí regresaba un error, pero visualmente el
+botón no hacía absolutamente nada. El fix: crear una conversación vacía es
+ahora **best effort** del lado de Firestore, igual que el historial de
+Vision — como una conversación recién creada no tiene ningún mensaje
+todavía, no hay nada que perder si el guardado falla en ese instante; el
+`thread_id` se genera y se devuelve igual, y la conversación se termina de
+crear "de verdad" en Firestore la primera vez que se le manda un mensaje (el
+mismo mecanismo de autocuración que ya tenía `append_turn`). Además, ahora sí
+se muestra un error en pantalla si esta acción (o borrar una conversación)
+llegara a fallar por cualquier otro motivo.
+
+**Importante — si sigues viendo el aviso "no se pudo guardar" en el chat, o
+"no guardado" en Vision, después de este fix:** eso ya NO es el bug de
+frontend del punto 4 (ese se corrigió y se autocura solo) — es una señal de
+que el guardado en Firestore está fallando **ahora mismo, de verdad**, para
+esa consulta o ese mensaje en particular. Repasa el checklist de permisos de
+abajo; si ya lo revisaste antes y sigue fallando, lo más probable es que el
+`add-iam-policy-binding` no haya terminado de propagarse, o que la revisión
+de Cloud Run desplegada no sea la que tiene la service account correcta —
+revisa el log completo en Cloud Run (paso 5 del checklist) para confirmar el
+mensaje de error exacto, porque desde aquí no hay forma de ver tu proyecto de
+GCP directamente.
+
 Si ves el error de Firestore específicamente
 (`Firestore no disponible... 403 Missing or insufficient permissions`),
 revisa en orden:
