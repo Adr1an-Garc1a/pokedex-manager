@@ -21,11 +21,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
-/** Combina la copia local (localStorage) con lo que devuelve el backend, sin
- * duplicar mensajes (por rol+contenido+timestamp). El PRIMER arreglo manda
- * cuando hay empate por la misma clave — se le pasa siempre el más confiable
- * primero (el servidor, una vez que respondió bien) para que una copia local
- * vieja nunca "gane" sobre un dato ya confirmado. */
+
 function mergeMessages(preferred: ChatMessage[], fallback: ChatMessage[]): ChatMessage[] {
   const seen = new Set<string>();
   const merged: ChatMessage[] = [];
@@ -66,8 +62,6 @@ export function PokedexChatPage() {
   const [lastPersistWarning, setLastPersistWarning] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Cuál conversación tenía abierta la última vez (por cuenta) — así al
-  // volver a esta sección se reabre la misma, no siempre "ninguna".
   const [activeThreadId, setActiveThreadId] = useState<string | null>(() =>
     userId ? loadCachedActiveThreadId(userId) : null
   );
@@ -229,7 +223,7 @@ export function PokedexChatPage() {
         <div>
           <h1 className="font-display text-2xl font-extrabold">¿Dudas de tu Pokédex? 💬</h1>
           <p className="text-sm text-poke-ink-soft">
-            Pregúntale lo que quieras sobre tu colección — la IA la lee en tiempo real.
+            Este es un chat abierto a preguntarle cualquier cosa que quieras sobre pokemon, puedes hacer consultas como por ejemplo: De mi coleccion, que pokemon es el que tiene mas nivel?" "De todos los pokemon que tengo en mi coleccion, como armarias un equipo de combate?" "Quien es el pokemon mas debil de mi coleccion?" etc
           </p>
         </div>
 

@@ -22,8 +22,6 @@ export function CollectionPage() {
     notes: "",
   });
 
-  // El id de usuario va en la queryKey para que cambiar de cuenta (sin cerrar
-  // el navegador) nunca sirva de caché los datos de la cuenta anterior.
   const { data: entries, isLoading } = useQuery({
     queryKey: ["collection", userId],
     queryFn: listMyCollection,
