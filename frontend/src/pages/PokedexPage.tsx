@@ -17,10 +17,7 @@ export function PokedexPage() {
   const [offset, setOffset] = useState(0);
   const queryClient = useQueryClient();
 
-  // La Pokédex en sí es un catálogo público (no depende del usuario), pero
-  // "qué Pokémon ya tengo" (para pintar el check de "en tu colección") sí —
-  // esa queryKey lleva el id de usuario por la misma razón que en las demás
-  // páginas (ver CollectionPage.tsx / InsightsPage.tsx).
+
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ["pokemon-list", offset, committedSearch],
     queryFn: () =>

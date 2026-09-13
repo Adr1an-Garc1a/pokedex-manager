@@ -223,7 +223,7 @@ export function PokedexChatPage() {
         <div>
           <h1 className="font-display text-2xl font-extrabold">¿Dudas de tu Pokédex? 💬</h1>
           <p className="text-sm text-poke-ink-soft">
-            Este es un chat abierto a preguntarle cualquier cosa que quieras sobre pokemon, puedes hacer consultas como por ejemplo: De mi coleccion, que pokemon es el que tiene mas nivel?" "De todos los pokemon que tengo en mi coleccion, como armarias un equipo de combate?" "Quien es el pokemon mas debil de mi coleccion?" etc
+            ¡Este es un chat abierto con Claude Haiku 5! Pregúntame lo que quieras sobre tus Pokémon.
           </p>
         </div>
 

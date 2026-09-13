@@ -9,26 +9,6 @@ import { loadCachedVisionHistory, saveCachedVisionHistory } from "@/utils/vision
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
-/** Se identifica por `entry_id` (o, si aún no tiene, por `image_url`) para
- * poder mezclar sin duplicar: lo identificado en esta sesión/dispositivo
- * (caché local, ver utils/visionHistoryCache.ts) con lo que devuelve el
- * backend — así el historial se ve completo (y sobrevive a navegar a otra
- * sección o recargar la página) incluso si el guardado en Firestore fallara
- * para alguna consulta en particular.
- *
- * `preferred` gana cuando la misma consulta (mismo `entry_id`/`image_url`)
- * aparece en ambos arreglos. Bug real reportado: la bandera "no guardado"
- * (`history_persisted: false`) de una identificación que en su momento no
- * se pudo guardar quedaba fija PARA SIEMPRE en localStorage — y como antes
- * se llamaba `mergeHistory(cachéLocal, servidor)`, esa copia local vieja
- * siempre ganaba, así que aunque Firestore ya tuviera guardada esa misma
- * consulta con `history_persisted: true` (guardado exitoso más tarde, o el
- * dato ya estaba bien desde un inicio), el usuario seguía viendo "⚠️ no
- * guardado" sin importar cuánto tiempo pasara ni si cerraba sesión — el
- * caché local nunca se "enteraba" de que el servidor ya tenía la versión
- * correcta. Ahora quien llama pasa primero la fuente en la que más confía
- * (el servidor, cuando ya respondió) para que si el mismo `entry_id` existe
- * en ambos lados, gane siempre el dato confirmado por Firestore. */
 function mergeHistory(
   preferred: PokemonVisionResult[],
   fallback: PokemonVisionResult[]

@@ -16,25 +16,7 @@ function threadsKey(userId: number): string {
   return `${THREADS_PREFIX}${userId}`;
 }
 
-/**
- * Caché local (localStorage) del chat MCP, por cuenta de usuario Y por
- * conversación ("Iniciar nueva conversación" agrega conversaciones nuevas,
- * cada una con su propio historial — antes solo había UNA conversación por
- * usuario, ahora cada una necesita su propia entrada de caché).
- *
- * Por qué existe: el historial de cada conversación se guarda en Firestore
- * (`docs/BONUS_FEATURES.md`), pero si ese guardado está fallando (el 403 de
- * permisos ya reportado), sin este caché la conversación se vería vacía cada
- * vez que el usuario recarga la página o vuelve de otra sección — y peor,
- * Claude "olvidaría" todo el contexto anterior en cada mensaje nuevo, porque
- * el backend arma la memoria de la conversación a partir de Firestore. Por
- * eso el frontend manda esta copia local como `client_history` en cada
- * mensaje (`api/ai.ts`) — el backend la fusiona con lo que Firestore sí
- * tenga (`chat.py`, `_merge_history`) para que el contexto real de la
- * conversación sobreviva sin importar el estado de Firestore. Firestore
- * sigue siendo la fuente de verdad cuando responde bien; esto es un
- * respaldo que se fusiona con ella, nunca al revés.
- */
+
 export function loadCachedChatHistory(userId: number, threadId: string): ChatMessage[] {
   try {
     const raw = localStorage.getItem(messagesKey(userId, threadId));
