@@ -2,8 +2,11 @@ import { Navbar } from "@/components/Navbar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
 import { CollectionPage } from "@/pages/CollectionPage";
+import { InsightsPage } from "@/pages/InsightsPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { PokedexChatPage } from "@/pages/PokedexChatPage";
 import { PokedexPage } from "@/pages/PokedexPage";
+import { VisionIdentifyPage } from "@/pages/VisionIdentifyPage";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 export default function App() {
@@ -27,6 +30,30 @@ export default function App() {
           element={
             <ProtectedRoute>
               <CollectionPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/identificar"
+          element={
+            <ProtectedRoute>
+              <VisionIdentifyPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/chat"
+          element={
+            <ProtectedRoute>
+              <PokedexChatPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/insights"
+          element={
+            <ProtectedRoute>
+              <InsightsPage />
             </ProtectedRoute>
           }
         />

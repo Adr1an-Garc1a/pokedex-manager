@@ -40,6 +40,22 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: str = "http://localhost:5173"
 
+    # --- IA (funcionalidades bonus) ---
+    # Vertex AI (Gemini) — usado por: identificación de Pokémon por foto (Vision)
+    # e insights de colección. Si google_cloud_project queda vacío, el SDK
+    # intenta resolverlo solo de las credenciales por defecto (ADC) — en Cloud
+    # Run normalmente basta, pero se puede fijar explícito si hace falta.
+    google_cloud_project: str = ""
+    vertex_location: str = "us-central1"
+    gemini_model: str = "gemini-2.5-flash"
+
+    # Anthropic (Claude) — usado por: chat MCP sobre la colección. Requiere una
+    # API key propia de https://console.anthropic.com (no es parte de GCP, ver
+    # docs/BONUS_FEATURES.md). Si queda vacía, el endpoint de chat responde 503
+    # en vez de fallar el arranque del backend.
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-5"
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

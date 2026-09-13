@@ -24,6 +24,10 @@ substitutions:
   _SECRET_DB_URL: pokedex-manager-database-url
   _SECRET_JWT_KEY: pokedex-manager-jwt-secret
   _SECRET_GOOGLE_CLIENT_ID: pokedex-manager-google-client-id
+  _SECRET_ANTHROPIC_API_KEY: pokedex-manager-anthropic-api-key
+  _VERTEX_LOCATION: us-central1
+  _GEMINI_MODEL: gemini-2.5-flash
+  _ANTHROPIC_MODEL: claude-sonnet-5
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -60,6 +64,10 @@ steps:
       - "SECRET_DB_URL=${_SECRET_DB_URL}"
       - "SECRET_JWT_KEY=${_SECRET_JWT_KEY}"
       - "SECRET_GOOGLE_CLIENT_ID=${_SECRET_GOOGLE_CLIENT_ID}"
+      - "SECRET_ANTHROPIC_API_KEY=${_SECRET_ANTHROPIC_API_KEY}"
+      - "VERTEX_LOCATION=${_VERTEX_LOCATION}"
+      - "GEMINI_MODEL=${_GEMINI_MODEL}"
+      - "ANTHROPIC_MODEL=${_ANTHROPIC_MODEL}"
 
   # --- Frontend (necesita la URL del backend en build-time, la incrusta Vite) ---
   - id: build-frontend

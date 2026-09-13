@@ -42,5 +42,11 @@ export RUNTIME_SA_EMAIL="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.co
 export SECRET_DB_URL="${APP_NAME}-database-url"
 export SECRET_JWT_KEY="${APP_NAME}-jwt-secret"
 export SECRET_GOOGLE_CLIENT_ID="${APP_NAME}-google-client-id"
+export SECRET_ANTHROPIC_API_KEY="${APP_NAME}-anthropic-api-key"
+
+# --- IA (funcionalidades bonus) ---
+export VERTEX_LOCATION="${VERTEX_LOCATION:-${REGION}}"
+export GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
+export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-5}"
 
 echo "Config cargada: PROJECT_ID=${PROJECT_ID} REGION=${REGION} APP_NAME=${APP_NAME}"

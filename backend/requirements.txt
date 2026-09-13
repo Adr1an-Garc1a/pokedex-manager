@@ -1,17 +1,23 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
-pydantic==2.10.3
+pydantic==2.12.5        # >=2.12.5 lo exige google-genai
 pydantic-settings==2.6.1
 sqlalchemy==2.0.36
 alembic==1.14.0
 psycopg[binary]==3.2.3
 httpx==0.28.1
 python-jose[cryptography]==3.3.0
-google-auth==2.36.0
+google-auth==2.58.0     # >=2.56.0 lo exige google-genai (Vertex AI SDK, ver abajo)
 python-multipart==0.0.19
 google-cloud-storage==2.19.0
 tenacity==9.0.0
 cachetools==5.5.0
+
+# --- IA (funcionalidades bonus) ---
+google-genai==2.23.0            # Gemini 2.5 Flash vía Vertex AI (vision + insights)
+anthropic==1.5.0                # Claude Sonnet 5 (chat MCP sobre la colección)
+mcp==1.27.0                     # Model Context Protocol SDK (servidor de tools en memoria)
+google-cloud-firestore==2.30.0  # persistencia de conversaciones del chat MCP
 
 # dev / test
 pytest==8.3.4

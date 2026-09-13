@@ -48,10 +48,14 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${RUNTIME_SA_EMAIL}" \
   --role="roles/secretmanager.secretAccessor" --quiet
 
-# Vertex AI: invocar modelos (Fase 2 / bonus) — no se usa en el core, pero se
-# deja listo para no reconfigurar IAM cuando se agregue.
+# Vertex AI: invocar modelos Gemini (bonus: Vision e Insights)
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${RUNTIME_SA_EMAIL}" \
   --role="roles/aiplatform.user" --quiet
+
+# Firestore: leer/escribir el historial del chat MCP (bonus: chat con Claude Sonnet 5)
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${RUNTIME_SA_EMAIL}" \
+  --role="roles/datastore.user" --quiet
 
 echo ">> Listo. La service account ${RUNTIME_SA_EMAIL} tiene los permisos necesarios."

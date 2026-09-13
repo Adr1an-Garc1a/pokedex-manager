@@ -9,6 +9,7 @@ venv/
 .ruff_cache/
 *.db
 *.sqlite3
+backend/uploads/
 
 # --- Node / frontend ---
 node_modules/

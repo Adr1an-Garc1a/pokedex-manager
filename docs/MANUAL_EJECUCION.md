@@ -13,6 +13,11 @@ local como reflejando los cambios en tu despliegue de GCP ya existente.
   (`docs/POSTMAN_GUIDE.md`).
 - El navbar ya no se rompe en pantallas de celular.
 - Nuevo: pipeline de CI/CD opcional (`docs/CI_CD.md`).
+- Nuevo: las 3 funcionalidades bonus de IA — identificar Pokémon por foto,
+  chat MCP con Claude Sonnet 5, e insights de colección. Requieren un par de
+  pasos de configuración manuales (una API key de Anthropic + crear la base
+  de Firestore) que no afectan al resto de la app si se omiten — ver
+  `docs/BONUS_FEATURES.md`.
 
 ## 1. Correr localmente (recomendado para revisar los cambios)
 
@@ -55,8 +60,19 @@ Deberías ver `8 passed` (incluye los tests nuevos de login/registro).
 
 Como ya tienes la infraestructura creada (Cloud SQL, bucket, Artifact
 Registry, service account), **no** vuelvas a correr `01` a `06` — esos ya
-hicieron su trabajo y son idempotentes, pero no hace falta repetirlos. Solo
-necesitas reconstruir las imágenes con el código nuevo y volver a desplegar:
+hicieron su trabajo y son idempotentes, pero no hace falta repetirlos.
+
+**Excepción esta vez**: si quieres las funcionalidades bonus de IA (chat,
+vision, insights), sí corre de nuevo `01-enable-apis.sh` y
+`02-service-accounts-iam.sh` (habilitan Firestore y agregan el permiso
+`roles/datastore.user` — no rompen nada de lo que ya tenías, son
+idempotentes), más el script nuevo `11-setup-firestore.sh` y, si quieres el
+chat, `06-secrets.sh` con tu API key de Anthropic. Detalle completo en
+`docs/BONUS_FEATURES.md`. Si no te interesa el bonus por ahora, sáltate este
+párrafo — el resto de la app funciona igual.
+
+Para lo demás, solo necesitas reconstruir las imágenes con el código nuevo y
+volver a desplegar:
 
 ```bash
 cd infra/gcp

@@ -4,9 +4,9 @@
 
 PokéDex Manager es una aplicación full-stack para gestionar una colección personal de
 Pokémon. La arquitectura sigue la propuesta original (Cloud Run + Cloud SQL + Google
-Sign-In + Vertex AI) pero **simplificada para un desarrollo de 3 días**, manteniendo el
-estándar GCP para que escalar a los features bonus (LMMs, MCP, insights con IA) sea
-un paso incremental y no un rediseño.
+Sign-In + Vertex AI) **simplificada para un desarrollo de 3 días** para el núcleo
+(core), y ya incluye las tres funcionalidades bonus de IA (Vision, chat MCP,
+insights) — ver `docs/BONUS_FEATURES.md` para el detalle completo de esa parte.
 
 ```mermaid
 flowchart TD
@@ -21,9 +21,10 @@ flowchart TD
     BE -->|httpx async, cache| PA["PokéAPI (pokeapi.co)<br/>Catálogo público de Pokémon"]
     BE -->|SQLAlchemy + Cloud SQL Connector| DB[("Cloud SQL — PostgreSQL<br/>Usuarios + Colección")]
     BE -->|Signed URLs| GCS[("Cloud Storage Bucket<br/>Imágenes de cartas / capturas")]
-    BE -.->|Fase 2 (bonus)| VX["Vertex AI / Gemini<br/>Vision, MCP, Insights"]
-
-    style VX stroke-dasharray: 5 5
+    BE -->|"google-genai (Vertex AI)"| VX["Gemini 2.5 Flash<br/>Vision + Insights (bonus)"]
+    BE -->|"MCP ClientSession en memoria"| MCP["Servidor MCP en proceso<br/>tools sobre la colección"]
+    MCP -.->|expone al modelo| CL["Claude Sonnet 5<br/>(Anthropic API, chat bonus)"]
+    BE -->|conversaciones| FS[("Firestore<br/>historial del chat, bonus")]
 ```
 
 ## 2. Decisiones clave y por qué
@@ -32,7 +33,7 @@ flowchart TD
 |---|---|---|
 | **FastAPI** (Python 3.11+) | Node/Express, Django | Async nativo, Pydantic para validación estricta, Swagger/OpenAPI autogenerado, se integra de forma natural con `google-auth`, `httpx` y los SDKs de Vertex AI para la Fase 2. |
 | **React + Vite + Tailwind** | Next.js, Vue | Vite da un ciclo de desarrollo muy rápido para 3 días; Tailwind permite iterar el look pastel/responsive sin escribir CSS a mano; no necesitamos SSR (no hay requisito de SEO). |
-| **Cloud SQL (PostgreSQL)** en vez de Firestore | Firestore | El dominio es relacional por naturaleza (usuarios 1‑N colección, cada entrada referencia un `pokemon_id` de un catálogo fijo). Un modelo relacional facilita filtros, agregaciones para los insights de la Fase 2 (conteo por tipo, etc.) y migraciones versionadas con Alembic. |
+| **Cloud SQL (PostgreSQL)** en vez de Firestore, para los datos core | Firestore | El dominio es relacional por naturaleza (usuarios 1‑N colección, cada entrada referencia un `pokemon_id` de un catálogo fijo). Un modelo relacional facilita filtros y agregaciones (conteo por tipo, etc.) y migraciones versionadas con Alembic. Firestore sí se usa, pero solo para un dato que no es relacional: el historial del chat MCP (bonus) — ver `docs/BONUS_FEATURES.md`. |
 | **Cloud Storage para imágenes** | BLOB en la base de datos | Costo y rendimiento: la base solo guarda la URL (firmada o pública), nunca el binario. |
 | **Google Sign-In (OAuth2 / OIDC)** | Auth propia con usuario/contraseña | Cumple "sistema de autenticación básico" sin reinventar manejo de contraseñas; el frontend obtiene un `id_token` de Google, el backend lo valida con `google-auth` y emite su propio JWT de sesión (para no atar toda request a Google). |
 | **Alembic** para migraciones | `Base.metadata.create_all` | Buenas prácticas: control de versiones del esquema, reproducible en cualquier entorno (local, CI, Cloud SQL). |
@@ -128,11 +129,21 @@ collection_entries
 usuario siga siendo legible aunque PokéAPI esté caída o cambie datos — es una decisión
 deliberada de resiliencia, no un descuido.
 
-## 6. Roadmap de features bonus (Fase 2, fuera de alcance de esta entrega)
+## 6. Funcionalidades bonus de IA (implementadas)
 
-- **LMM / Vision**: endpoint `POST /api/v1/vision/analyze-card` que sube la imagen a GCS y la envía a Gemini con salida estructurada (JSON Schema) para autocompletar el formulario.
-- **MCP**: servidor MCP en `backend/mcp_server/` que expone tools (`get_user_collection`, `get_pokemon_stats`) para un asistente conversacional.
-- **Insights**: endpoint `GET /api/v1/insights` que agrega la colección (distribución de tipos, fortalezas/debilidades) y se lo pasa a Gemini para generar recomendaciones.
+Las tres funcionalidades bonus del enunciado ya están implementadas:
 
-Estos puntos ya están reflejados en el diagrama (rama punteada a Vertex AI) para que la
-integración no requiera romper la arquitectura actual.
+- **Vision**: `POST /api/v1/ai/vision/identify` — sube la foto a Cloud Storage y la
+  envía a **Gemini 2.5 Flash** (Vertex AI / Model Garden) para identificar el Pokémon;
+  las ventajas/desventajas de tipo se calculan aparte contra PokéAPI (no se le pide
+  al modelo que "recuerde" la tabla de tipos).
+- **Chat MCP**: `POST /api/v1/ai/chat` — **Claude Sonnet 5** (API de Anthropic)
+  conversa sobre la colección real del usuario usando un servidor **MCP** (Model
+  Context Protocol) con tools (`list_my_collection`, `get_collection_stats`,
+  `get_pokemon_info`); el historial se persiste en **Firestore**.
+- **Insights**: `GET /api/v1/ai/insights` — Gemini 2.5 Flash analiza la colección
+  actual y devuelve equipo ideal, fortalezas/debilidades, fun facts y alternativas.
+
+El detalle completo (por qué Anthropic directo y no Vertex para Claude, cómo
+funciona el servidor MCP en memoria, qué hay que configurar a mano una sola vez,
+diagramas de secuencia) está en **[`docs/BONUS_FEATURES.md`](BONUS_FEATURES.md)**.

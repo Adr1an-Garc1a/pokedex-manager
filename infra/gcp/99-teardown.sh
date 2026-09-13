@@ -14,8 +14,11 @@ echo "  - Cloud Run:   ${BACKEND_SERVICE}, ${FRONTEND_SERVICE}"
 echo "  - Cloud SQL:   ${SQL_INSTANCE} (¡borra los datos!)"
 echo "  - GCS bucket:  gs://${GCS_BUCKET} (¡borra las imágenes!)"
 echo "  - Artifact Registry repo: ${ARTIFACT_REPO}"
-echo "  - Secrets:     ${SECRET_DB_URL}, ${SECRET_JWT_KEY}, ${SECRET_GOOGLE_CLIENT_ID}"
+echo "  - Secrets:     ${SECRET_DB_URL}, ${SECRET_JWT_KEY}, ${SECRET_GOOGLE_CLIENT_ID}, ${SECRET_ANTHROPIC_API_KEY} (si existe)"
 echo "  - Service account: ${RUNTIME_SA_EMAIL}"
+echo "  - NO se borra la base de datos de Firestore (guarda el historial del chat IA):"
+echo "    es una sola base por proyecto y borrarla es irreversible; si de verdad la quieres"
+echo "    eliminar, hazlo a mano: gcloud firestore databases delete --database='(default)' --project=${PROJECT_ID}"
 read -r -p "¿Confirmas? Escribe 'borrar todo' para continuar: " CONFIRM
 if [[ "${CONFIRM}" != "borrar todo" ]]; then
   echo "Cancelado."
@@ -31,7 +34,7 @@ gcloud storage rm --recursive "gs://${GCS_BUCKET}" --quiet || true
 
 gcloud artifacts repositories delete "${ARTIFACT_REPO}" --project="${PROJECT_ID}" --location="${REGION}" --quiet || true
 
-for secret in "${SECRET_DB_URL}" "${SECRET_JWT_KEY}" "${SECRET_GOOGLE_CLIENT_ID}"; do
+for secret in "${SECRET_DB_URL}" "${SECRET_JWT_KEY}" "${SECRET_GOOGLE_CLIENT_ID}" "${SECRET_ANTHROPIC_API_KEY}"; do
   gcloud secrets delete "${secret}" --project="${PROJECT_ID}" --quiet || true
 done
 

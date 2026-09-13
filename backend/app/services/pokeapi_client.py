@@ -140,6 +140,47 @@ class PokeAPIClient:
         self._cache_set(cache_key, detail)
         return detail
 
+    async def get_type_matchups(self, types: list[str]) -> tuple[list[str], list[str]]:
+        """Devuelve (fuerte_contra, débil_contra) para una lista de tipos.
+
+        Se usa desde las funcionalidades de IA (Vision e Insights): en vez de
+        confiar en que el modelo "recuerde" bien las tablas de tipos de
+        Pokémon (puede alucinar), se le pide solo que identifique el/los
+        tipo(s), y las ventajas/desventajas reales se calculan aquí con el
+        dato autoritativo de PokéAPI (`/type/{nombre}` → damage_relations).
+
+        Simplificación deliberada para un Pokémon de dos tipos: se combinan
+        (unión, sin duplicados) los "fuerte contra" / "débil contra" de cada
+        tipo por separado — no se calculan multiplicadores compuestos (x4,
+        x0.25, inmunidades que se cancelan entre sí). Es una aproximación
+        "suficientemente buena" para una feature de fun facts, no para
+        simular daño de batalla exacto.
+        """
+        strong_against: set[str] = set()
+        weak_against: set[str] = set()
+
+        for type_name in types:
+            cache_key = f"type:{type_name.lower()}"
+            cached = self._cache_get(cache_key)
+            if cached is None:
+                try:
+                    data = await self._get(f"/type/{type_name.lower()}")
+                except HTTPException:
+                    continue
+                cached = data
+                self._cache_set(cache_key, cached)
+
+            relations = cached.get("damage_relations", {})
+            strong_against.update(t["name"] for t in relations.get("double_damage_to", []))
+            weak_against.update(t["name"] for t in relations.get("double_damage_from", []))
+
+        # Un tipo no cuenta como "débil contra sí mismo" ni "fuerte contra sí
+        # mismo" para un Pokémon de tipo dual raro (ej. mismo tipo repetido).
+        strong_against -= set(t.lower() for t in types)
+        weak_against -= set()  # (se deja explícito por si se agrega lógica futura)
+
+        return sorted(strong_against), sorted(weak_against)
+
 
 _client_singleton: PokeAPIClient | None = None
 

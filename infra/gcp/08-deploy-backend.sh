@@ -35,6 +35,19 @@ if [[ -z "${FRONTEND_URL:-}" ]]; then
 fi
 CORS_ORIGINS_VALUE="${FRONTEND_URL:-*}"
 
+# Bonus IA: ANTHROPIC_API_KEY es OPCIONAL (chat MCP con Claude Sonnet 5) — si
+# el secreto no existe todavía (no todo el mundo configura el bonus), no se
+# incluye en --set-secrets: gcloud fallaría el deploy entero si el secreto
+# referenciado no existe. Sin ella, el resto de la app funciona igual; el
+# endpoint de chat simplemente responde 503 hasta que se cree el secreto
+# (ver 06-secrets.sh) y se vuelva a desplegar.
+SECRETS_VALUE="DATABASE_URL=${SECRET_DB_URL}:latest,JWT_SECRET_KEY=${SECRET_JWT_KEY}:latest,GOOGLE_CLIENT_ID=${SECRET_GOOGLE_CLIENT_ID}:latest"
+if gcloud secrets describe "${SECRET_ANTHROPIC_API_KEY}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  SECRETS_VALUE="${SECRETS_VALUE},ANTHROPIC_API_KEY=${SECRET_ANTHROPIC_API_KEY}:latest"
+else
+  echo "   (nota: no existe el secreto ${SECRET_ANTHROPIC_API_KEY} — el chat de IA quedará deshabilitado hasta correr 06-secrets.sh con ANTHROPIC_API_KEY)"
+fi
+
 # OJO 2: por defecto `--set-env-vars` separa pares KEY=VALUE con coma, pero
 # CORS_ORIGINS_VALUE puede tener varias URLs separadas por coma dentro de
 # UN SOLO valor (ver arriba) — con la sintaxis por defecto, gcloud las
@@ -50,8 +63,8 @@ gcloud run deploy "${BACKEND_SERVICE}" \
   --image="${BACKEND_IMAGE}" \
   --service-account="${RUNTIME_SA_EMAIL}" \
   --add-cloudsql-instances="${CONNECTION_NAME}" \
-  --set-secrets="DATABASE_URL=${SECRET_DB_URL}:latest,JWT_SECRET_KEY=${SECRET_JWT_KEY}:latest,GOOGLE_CLIENT_ID=${SECRET_GOOGLE_CLIENT_ID}:latest" \
-  --set-env-vars="^;^STORAGE_BACKEND=gcs;GCS_BUCKET_NAME=${GCS_BUCKET};ENVIRONMENT=production;CORS_ORIGINS=${CORS_ORIGINS_VALUE}" \
+  --set-secrets="${SECRETS_VALUE}" \
+  --set-env-vars="^;^STORAGE_BACKEND=gcs;GCS_BUCKET_NAME=${GCS_BUCKET};ENVIRONMENT=production;CORS_ORIGINS=${CORS_ORIGINS_VALUE};GOOGLE_CLOUD_PROJECT=${PROJECT_ID};VERTEX_LOCATION=${VERTEX_LOCATION};GEMINI_MODEL=${GEMINI_MODEL};ANTHROPIC_MODEL=${ANTHROPIC_MODEL}" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=4 \

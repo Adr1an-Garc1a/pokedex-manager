@@ -66,6 +66,13 @@ Todavía en la consola, en la misma pantalla de Triggers:
    | `_BACKEND_URL` | la URL de tu backend ya desplegado (`gcloud run services describe pokedex-manager-backend --region=us-central1 --format='value(status.url)'`) |
    | `_GOOGLE_CLIENT_ID` | tu Google OAuth Client ID |
 
+   `cloudbuild.yaml` ya trae valores por defecto para las sustituciones de las
+   funcionalidades bonus de IA (`_SECRET_ANTHROPIC_API_KEY`, `_VERTEX_LOCATION`,
+   `_GEMINI_MODEL`, `_ANTHROPIC_MODEL`) — no hace falta agregarlas al trigger a
+   menos que quieras cambiar esos valores. Lo que sí falta para que el chat de
+   IA funcione es crear el secreto de la API key de Anthropic (`06-secrets.sh`)
+   — ver `docs/BONUS_FEATURES.md`.
+
 9. Service account: puedes dejar la de Cloud Build por defecto (ya le diste permisos en el Paso 1).
 10. Click **Crear**.
 

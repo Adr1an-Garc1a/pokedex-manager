@@ -43,6 +43,21 @@ else
 fi
 
 echo ""
+echo ">> ANTHROPIC_API_KEY (bonus: chat MCP con Claude Sonnet 5):"
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "   No se definió la variable de entorno ANTHROPIC_API_KEY."
+  echo "   Crea una API key en https://console.anthropic.com/settings/keys"
+  echo "   (cuenta de Anthropic, separada de tu facturación de GCP) y vuelve a"
+  echo "   correr este script así:"
+  echo "     export ANTHROPIC_API_KEY=sk-ant-..."
+  echo "     ./06-secrets.sh"
+  echo "   Sin este secreto, el botón de chat de la app responde 503 (el resto"
+  echo "   de la app funciona igual)."
+else
+  upsert_secret "${SECRET_ANTHROPIC_API_KEY}" "${ANTHROPIC_API_KEY}"
+fi
+
+echo ""
 echo ">> Secretos disponibles en Secret Manager:"
 gcloud secrets list --project="${PROJECT_ID}" \
   --filter="name~${APP_NAME}" --format="table(name)"

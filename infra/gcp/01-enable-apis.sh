@@ -20,8 +20,9 @@ gcloud services enable \
   iam.googleapis.com \
   compute.googleapis.com \
   aiplatform.googleapis.com \
+  firestore.googleapis.com \
   --project="${PROJECT_ID}"
 
 echo ">> APIs habilitadas correctamente."
-echo ">> Nota: aiplatform.googleapis.com (Vertex AI) se habilita ya para la Fase 2 (bonus: LMM/insights),"
-echo "   aunque esta entrega solo usa las funcionalidades core."
+echo ">> aiplatform.googleapis.com (Vertex AI, Gemini 2.5 Flash) y firestore.googleapis.com"
+echo "   (historial del chat) son para las funcionalidades bonus de IA — ver docs/BONUS_FEATURES.md."

@@ -48,10 +48,21 @@ para cómo se resuelve la integración con la API externa.
 - **Interfaz responsive**: mobile-first, paleta pastel azul/verde-azulado,
   tarjetas con tipos de Pokémon coloreados, spinner temático (Pokéball).
 
-Las funcionalidades bonus (LMM/Vision, MCP, insights con IA) están fuera del
-alcance de esta entrega — el roadmap está documentado en
-`docs/ARCHITECTURE.md#6-roadmap-de-features-bonus-fase-2-fuera-de-alcance-de-esta-entrega`
-para que se agreguen sin rediseñar nada.
+## Funcionalidades bonus (IA)
+
+- **Identificar Pokémon por foto** (`/identificar`): sube una imagen y **Gemini
+  2.5 Flash** (Vertex AI) la identifica — nombre, descripción, fun fact, y (si
+  coincide con la Pokédex real) tipos y ventajas/desventajas.
+- **Chat sobre tu colección** (`/chat`): **Claude Sonnet 5** responde preguntas
+  con acceso real a tu colección vía un servidor **MCP** propio; el historial se
+  guarda en Firestore.
+- **Insights de colección** (`/insights`): equipo ideal, fortalezas/debilidades y
+  sugerencias generadas por IA a partir de tu colección actual.
+
+Requieren un par de pasos manuales de configuración (una API key de Anthropic y
+crear la base de Firestore) que **no** son necesarios para las funciones core —
+ver [`docs/BONUS_FEATURES.md`](docs/BONUS_FEATURES.md) para el paso a paso y las
+decisiones de arquitectura detrás de cada una.
 
 ## Cómo correr el proyecto localmente (recomendado para evaluar)
 

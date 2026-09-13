@@ -49,12 +49,21 @@ export function Navbar() {
           )}
         </div>
 
-        <nav className="order-3 flex w-full items-center justify-center gap-2 sm:order-2 sm:w-auto sm:flex-1">
+        <nav className="order-3 flex w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:order-2 sm:w-auto sm:flex-1">
           <NavLink to="/pokedex" className={navLinkClass}>
             Pokédex
           </NavLink>
           <NavLink to="/collection" className={navLinkClass}>
             Mi Colección
+          </NavLink>
+          <NavLink to="/identificar" className={navLinkClass}>
+            Identificar 📸
+          </NavLink>
+          <NavLink to="/chat" className={navLinkClass}>
+            Chat IA 💬
+          </NavLink>
+          <NavLink to="/insights" className={navLinkClass}>
+            Insights 🧠
           </NavLink>
         </nav>
       </div>
