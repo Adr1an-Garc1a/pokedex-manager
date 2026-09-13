@@ -93,6 +93,12 @@ export interface PokemonVisionResult {
   weak_against: string[];
   strong_against_es: string[];
   weak_against_es: string[];
+  height_m: number | null;
+  weight_kg: number | null;
+  abilities: string[];
+  pre_evolution: string | null;
+  evolutions: string[];
+  history_persisted: boolean;
 }
 
 export interface ChatMessage {

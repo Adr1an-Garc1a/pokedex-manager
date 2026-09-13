@@ -29,10 +29,11 @@ Flujo:
    encontrarlo, con salida JSON estructurada (`response_schema`) para no
    tener que parsear texto libre.
 3. **Diseño importante**: no se le pide al modelo que "recuerde" datos duros
-   de la Pokédex (tabla de tipos, generación de debut, hábitat) — eso puede
-   alucinarlo. En vez de eso, el nombre que identificó Gemini se resuelve
-   contra **PokéAPI** (la misma fuente de verdad que usa el resto de la app)
-   y ahí se calculan/consultan con datos reales:
+   de la Pokédex (tabla de tipos, generación de debut, hábitat, peso, altura,
+   habilidades, cadena evolutiva) — eso puede alucinarlo. En vez de eso, el
+   nombre que identificó Gemini se resuelve contra **PokéAPI** (la misma
+   fuente de verdad que usa el resto de la app) y ahí se calculan/consultan
+   con datos reales:
    - Fuerte/débil contra qué tipo (`PokeAPIClient.get_type_matchups`), además
      traducido a español (`translate_types_es`) para mostrarlo en la tabla.
    - Juego de primera aparición y zonas donde es fácil encontrarlo
@@ -40,24 +41,38 @@ Flujo:
      PokéAPI: campos `generation` y `habitat`, con un mapeo fijo a nombres de
      juego/zona en español). El estimado del modelo se usa solo como
      respaldo si el nombre identificado no se pudo resolver contra PokéAPI.
+   - Peso y altura (`/pokemon/{id}`, convertidos a kg/metros — PokéAPI los da
+     en hectogramos/decímetros) y habilidades (mismo endpoint).
+   - Pre-evolución y evoluciones directas
+     (`PokeAPIClient.get_evolution_info`, contra `/evolution-chain/{id}` —
+     recorre el árbol de la cadena evolutiva completa, que puede ramificarse
+     como en Eevee, buscando el nodo del Pokémon identificado).
    Si el modelo identificó algo que no existe tal cual en PokéAPI, se
    devuelve igual su descripción/estimados, sin esos campos extra ni la
    opción de "agregar a mi colección" con un id oficial.
 4. La consulta completa (con la foto) se guarda en el historial de Vision del
    usuario en Firestore (colección `vision_history`, un documento por usuario
    con las últimas 50 consultas) — **best effort**: si Firestore falla, la
-   identificación ya se le mostró al usuario de todos modos, simplemente no
-   queda guardada para verla después.
+   identificación ya se le mostró al usuario de todos modos con
+   `history_persisted: false`, simplemente no queda guardada para verla
+   después. El frontend, además, mantiene en memoria las identificaciones
+   hechas durante la sesión y las mezcla con lo que devuelve el backend (por
+   `entry_id`) — así el historial de esta sesión se ve completo aunque el
+   guardado en Firestore esté fallando (ver la sección de troubleshooting del
+   chat más abajo — es el mismo permiso de IAM, `roles/datastore.user`, el
+   que cubre ambas colecciones de Firestore).
 
 Por qué Vertex AI / Model Garden (y no la API pública de Gemini directamente):
 mantiene todo dentro de la misma cuenta de servicio y facturación de GCP que ya
 usa el resto del proyecto (Cloud Run, Cloud SQL, GCS) — un solo lugar donde
 gestionar IAM y costos.
 
-En el frontend, el resultado y todo el historial se muestran en una sola
-tabla (`VisionIdentifyPage.tsx`) con columnas: foto, nombre, tipo,
-descripción, juego de primera aparición, zonas donde es fácil encontrarlo,
-fuerte contra y débil contra (estos dos últimos ya en español).
+En el frontend, el resultado recién identificado se muestra primero como una
+tarjeta con todo el detalle (foto, nombre, tipo, descripción, peso, altura,
+habilidades, pre-evolución/evoluciones, juego de primera aparición, zonas
+donde es fácil encontrarlo, fuerte/débil contra en español) y el botón de
+agregar a la colección; debajo, el historial completo (`VisionIdentifyPage.tsx`)
+se muestra como una tabla con esas mismas columnas.
 
 ## 2. Chat MCP — Claude Sonnet 5 sobre tu colección
 

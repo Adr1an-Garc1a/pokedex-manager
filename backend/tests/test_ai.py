@@ -52,6 +52,7 @@ def _fake_vision_history(monkeypatch):
 
     async def fake_append(user_id, entry):
         store.setdefault(user_id, []).append(entry)
+        return True
 
     async def fake_get(user_id):
         return list(reversed(store.get(user_id, [])))
@@ -163,9 +164,13 @@ def test_vision_identify_resolves_against_pokeapi_and_translates_types(client, m
     assert body["weak_against_es"] == ["tierra"]
     assert body["first_appearance_game"] == "Pokémon Rojo, Azul y Amarillo"
     assert body["habitat_zones"] == "bosques"
+    assert body["height_m"] == 0.4
+    assert body["weight_kg"] == 6.0
+    assert body["abilities"] == ["static"]
     assert body["image_url"].startswith("https://fake-storage.example.com/")
     assert body["entry_id"]
     assert body["created_at"]
+    assert body["history_persisted"] is True
 
     # Y quedó guardada en el historial (más reciente primero).
     history_response = client.get(
@@ -175,6 +180,46 @@ def test_vision_identify_resolves_against_pokeapi_and_translates_types(client, m
     history_body = history_response.json()
     assert len(history_body) == 1
     assert history_body[0]["pokemon_name"] == "pikachu"
+
+
+@pytest.mark.asyncio
+async def test_get_evolution_info_finds_pre_evolution_and_evolutions(monkeypatch):
+    """pichu -> pikachu -> raichu: para pikachu, la pre-evolución es pichu y
+    la evolución directa es raichu."""
+    fake_chain = {
+        "chain": {
+            "species": {"name": "pichu"},
+            "evolves_to": [
+                {
+                    "species": {"name": "pikachu"},
+                    "evolves_to": [
+                        {"species": {"name": "raichu"}, "evolves_to": []}
+                    ],
+                }
+            ],
+        }
+    }
+
+    client_instance = pokeapi_client_module.PokeAPIClient()
+
+    async def fake_get(self, path, params=None):
+        assert path == "/evolution-chain/10/"
+        return fake_chain
+
+    monkeypatch.setattr(pokeapi_client_module.PokeAPIClient, "_get", fake_get)
+
+    result = await client_instance.get_evolution_info(
+        evolution_chain_url="https://pokeapi.co/api/v2/evolution-chain/10/",
+        pokemon_name="pikachu",
+    )
+    assert result == {"pre_evolution": "pichu", "evolutions": ["raichu"]}
+
+    # La primera etapa de la cadena no tiene pre-evolución.
+    result_first_stage = await client_instance.get_evolution_info(
+        evolution_chain_url="https://pokeapi.co/api/v2/evolution-chain/10/",
+        pokemon_name="pichu",
+    )
+    assert result_first_stage == {"pre_evolution": None, "evolutions": ["pikachu"]}
 
 
 def test_vision_history_empty_for_new_user(client, monkeypatch):

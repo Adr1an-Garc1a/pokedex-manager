@@ -256,6 +256,7 @@ class PokeAPIClient:
         data = await self._get(f"/pokemon-species/{str(id_or_name).lower()}")
         generation = (data.get("generation") or {}).get("name")
         habitat = (data.get("habitat") or {}).get("name")
+        evolution_chain_url = (data.get("evolution_chain") or {}).get("url")
 
         result = {
             "generation": generation,
@@ -264,9 +265,56 @@ class PokeAPIClient:
             ),
             "habitat": habitat,
             "habitat_zones": _HABITAT_ES.get(habitat, _HABITAT_DESCONOCIDO_ES),
+            "evolution_chain_url": evolution_chain_url,
         }
         self._cache_set(cache_key, result)
         return result
+
+    async def get_evolution_info(self, *, evolution_chain_url: str, pokemon_name: str) -> dict:
+        """Devuelve {"pre_evolution": str | None, "evolutions": list[str]} para
+        `pokemon_name` dentro de su cadena evolutiva completa (`/evolution-chain/{id}`).
+
+        Igual que el resto de datos "duros" de Pokédex en este cliente: se lee
+        directo de PokéAPI en vez de pedírselo al modelo de IA. Si el Pokémon
+        no aparece en la cadena (no debería pasar si el nombre es válido) o
+        la cadena no se puede resolver, se devuelve vacío en vez de fallar.
+        """
+        cache_key = f"evochain:{evolution_chain_url}"
+        cached = self._cache_get(cache_key)
+        if cached is None:
+            # evolution_chain_url ya es una URL absoluta de PokéAPI; _get solo
+            # acepta paths relativos al cliente, así que se recorta el prefijo.
+            path = evolution_chain_url.replace(self._base_url, "")
+            cached = await self._get(path)
+            self._cache_set(cache_key, cached)
+
+        chain = cached.get("chain")
+        if not chain:
+            return {"pre_evolution": None, "evolutions": []}
+
+        found = _find_evolution_node(chain, pokemon_name.lower())
+        if found is None:
+            return {"pre_evolution": None, "evolutions": []}
+        pre_evolution, evolutions = found
+        return {"pre_evolution": pre_evolution, "evolutions": evolutions}
+
+
+def _find_evolution_node(
+    node: dict, target: str, parent_name: str | None = None
+) -> tuple[str | None, list[str]] | None:
+    """Recorre el árbol de `/evolution-chain/{id}` (puede ramificarse, ej.
+    Eevee) buscando `target`; devuelve (nombre de la pre-evolución o None,
+    [nombres de las evoluciones directas]) o None si no se encontró."""
+    name = node.get("species", {}).get("name")
+    if name == target:
+        children = [c.get("species", {}).get("name") for c in node.get("evolves_to", [])]
+        return parent_name, [c for c in children if c]
+
+    for child in node.get("evolves_to", []):
+        result = _find_evolution_node(child, target, parent_name=name)
+        if result is not None:
+            return result
+    return None
 
 
 _client_singleton: PokeAPIClient | None = None

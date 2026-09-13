@@ -123,7 +123,12 @@ async def get_vision_history(user_id: int) -> list[dict]:
     return list(reversed(entries))
 
 
-async def append_vision_entry(user_id: int, entry: dict) -> None:
+async def append_vision_entry(user_id: int, entry: dict) -> bool:
+    """Devuelve True si se guardó, False si falló (nunca lanza excepción: la
+    identificación ya se le mostró al usuario, perder el guardado en el
+    historial es un problema menor, no debe tumbar la respuesta — pero sí se
+    le informa al frontend vía el campo `history_persisted`, igual que en el
+    chat, en vez de fallar en silencio total)."""
     now = datetime.now(timezone.utc).isoformat()
     try:
         client = _get_client()
@@ -133,8 +138,7 @@ async def append_vision_entry(user_id: int, entry: dict) -> None:
         entries.append(entry)
         entries = entries[-_MAX_VISION_HISTORY:]
         await doc_ref.set({"entries": entries, "updated_at": now})
+        return True
     except Exception:
-        # Deliberadamente silencioso (a diferencia de append_turn del chat):
-        # la identificación ya se le mostró al usuario, perder el guardado en
-        # el historial es un problema menor, no debe tumbar la respuesta.
         logger.warning("No se pudo guardar la consulta de Vision en el historial", exc_info=True)
+        return False

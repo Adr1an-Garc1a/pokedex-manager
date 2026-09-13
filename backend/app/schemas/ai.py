@@ -43,6 +43,20 @@ class PokemonVisionResult(BaseModel):
     weak_against_es: list[str] = Field(
         default_factory=list, description="Igual que weak_against, traducido a español (mismo orden)"
     )
+    height_m: float | None = Field(default=None, description="Altura en metros (dato real de PokéAPI)")
+    weight_kg: float | None = Field(default=None, description="Peso en kilogramos (dato real de PokéAPI)")
+    abilities: list[str] = Field(default_factory=list, description="Habilidades (dato real de PokéAPI)")
+    pre_evolution: str | None = Field(
+        default=None, description="Nombre de la pre-evolución inmediata, si tiene"
+    )
+    evolutions: list[str] = Field(
+        default_factory=list, description="Nombres de sus evoluciones directas (puede ser más de una, ej. Eevee)"
+    )
+
+    history_persisted: bool = Field(
+        default=True,
+        description="false si la identificación se hizo bien pero no se pudo guardar en el historial de Firestore",
+    )
 
 
 # --- 2. Chat MCP (Claude Sonnet 5) ----------------------------------------

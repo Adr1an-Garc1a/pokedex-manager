@@ -109,12 +109,24 @@ async def identify_pokemon_from_image(
         result.weak_against = weak_against
         result.strong_against_es = translate_types_es(strong_against)
         result.weak_against_es = translate_types_es(weak_against)
+        result.height_m = round(detail.height / 10, 2)
+        result.weight_kg = round(detail.weight / 10, 2)
+        result.abilities = detail.abilities
 
-        # Juego de primera aparición / hábitat: se sobreescribe el estimado
-        # del modelo con el dato real de PokéAPI (/pokemon-species/{id}).
+        # Juego de primera aparición / hábitat / cadena evolutiva: se
+        # sobreescribe el estimado del modelo con el dato real de PokéAPI
+        # (/pokemon-species/{id} y /evolution-chain/{id}).
         species = await client.get_species_info(detail.id)
         result.first_appearance_game = species["first_appearance_game"]
         result.habitat_zones = species["habitat_zones"]
+
+        evolution_chain_url = species.get("evolution_chain_url")
+        if evolution_chain_url:
+            evo = await client.get_evolution_info(
+                evolution_chain_url=evolution_chain_url, pokemon_name=detail.name
+            )
+            result.pre_evolution = evo["pre_evolution"]
+            result.evolutions = evo["evolutions"]
     except Exception:
         # El modelo identificó algo que no existe (tal cual) en PokéAPI —
         # se devuelve igual la identificación "cruda" del modelo.
@@ -123,6 +135,6 @@ async def identify_pokemon_from_image(
     result.entry_id = uuid.uuid4().hex
     result.created_at = datetime.now(timezone.utc).isoformat()
 
-    await append_vision_entry(user_id, result.model_dump())
+    result.history_persisted = await append_vision_entry(user_id, result.model_dump())
 
     return result
