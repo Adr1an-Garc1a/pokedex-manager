@@ -19,7 +19,12 @@ Flujo por cada mensaje del usuario:
   5. El turno completo (mensaje del usuario + respuesta final) se persiste
      en Firestore, en la conversación (`thread_id`) que se venga usando — el
      usuario puede tener varias conversaciones guardadas a la vez ("Iniciar
-     nueva conversación") y retomar cualquiera de ellas más tarde.
+     nueva conversación") y retomar cualquiera de ellas más tarde. Si esa
+     conversación todavía no tiene un título "real" (una recién creada, o
+     una vieja que se quedó pegada en el genérico "Nueva conversación"), se
+     le pide uno a Claude Haiku a partir de este primer intercambio real
+     (`_generate_thread_title` — modelo fijo y barato, independiente de
+     ANTHROPIC_MODEL) en vez de solo truncar el primer mensaje.
 """
 from __future__ import annotations
 
@@ -35,13 +40,26 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.user import User
 from app.services.ai.mcp_tools import build_mcp_server
-from app.services.firestore_client import append_turn, get_thread_messages
+from app.services.firestore_client import DEFAULT_THREAD_TITLE, append_turn, get_thread
 
 settings = get_settings()
 logger = logging.getLogger("pokedex_manager.ai.chat")
 
 _MAX_TOOL_ITERATIONS = 5
 _MAX_HISTORY_MESSAGES = 20  # últimos N mensajes que se le mandan a Claude como contexto
+
+# Modelo FIJO para generar el título de una conversación (independiente de
+# ANTHROPIC_MODEL, el que se use para el chat en sí) — resumir un intercambio
+# en <=6 palabras es una tarea trivial que no necesita el modelo "grande" que
+# se esté usando para conversar; usar siempre el más barato disponible tiene
+# sentido sin importar qué tan bueno (y caro) sea el modelo principal.
+_TITLE_MODEL = "claude-haiku-4-5-20251001"
+_TITLE_MAX_TOKENS = 20
+_TITLE_SYSTEM_PROMPT = (
+    "Resume esta conversación de un chat sobre una colección de Pokémon en un título de "
+    "MÁXIMO 6 palabras, en español, sin comillas ni punto final. Responde solo con el "
+    "título, nada más de texto."
+)
 
 _SYSTEM_PROMPT_TEMPLATE = (
     "Eres el asistente de PokéDex Manager, ayudando a {user_name} a explorar y "
@@ -110,6 +128,41 @@ def _merge_history(*sources: list[dict]) -> list[dict]:
     return merged
 
 
+async def _generate_thread_title(
+    anthropic_client: AsyncAnthropic, user_message: str, assistant_reply: str
+) -> str | None:
+    """Le pide a Claude Haiku (modelo fijo y barato, ver `_TITLE_MODEL`) un
+    título corto para la conversación, a partir de un intercambio real
+    (mensaje del usuario + respuesta de Claude) — en vez de simplemente
+    recortar el mensaje del usuario a 40 caracteres (`firestore_client._make_title`),
+    que no resume nada, solo trunca.
+
+    Nunca lanza: si esta llamada falla por lo que sea (red, la API de
+    Anthropic caída, lo que sea), el llamador (`run_pokedex_chat`) se cae de
+    vuelta al recorte simple — un título para la conversación jamás debe
+    tumbar el chat en sí ni dejarla sin ningún título."""
+    try:
+        response = await anthropic_client.messages.create(
+            model=_TITLE_MODEL,
+            max_tokens=_TITLE_MAX_TOKENS,
+            system=_TITLE_SYSTEM_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Usuario: {user_message}\nAsistente: {assistant_reply}",
+                }
+            ],
+        )
+        title = "".join(
+            getattr(block, "text", "") for block in response.content if getattr(block, "type", None) == "text"
+        ).strip()
+        title = title.strip("\"'.").strip()
+        return title[:60] or None
+    except Exception:
+        logger.warning("No se pudo generar un título con IA para la conversación nueva", exc_info=True)
+        return None
+
+
 async def run_pokedex_chat(
     *,
     db: Session,
@@ -122,10 +175,18 @@ async def run_pokedex_chat(
     conversación todavía, o el frontend pide explícitamente una nueva sin
     pre-crearla), se genera un ID nuevo aquí mismo — la conversación se crea
     "de facto" en Firestore la primera vez que `append_turn` la guarda (con un
-    título derivado de este mismo mensaje)."""
+    título generado por IA a partir de este mismo mensaje, ver más abajo)."""
     thread_id = thread_id or uuid.uuid4().hex
-    history = _merge_history(await get_thread_messages(user.id, thread_id), client_history or [])
+    thread = await get_thread(user.id, thread_id)
+    history = _merge_history(thread.get("messages", []), client_history or [])
     recent_history = history[-_MAX_HISTORY_MESSAGES:]
+    # Si esta conversación todavía no tiene un título "real" (nunca ha tenido
+    # ninguno, o se quedó en el genérico que le pone "Iniciar nueva
+    # conversación"), se le genera uno con IA una vez que Claude responda —
+    # así el título refleja de qué se habló, no solo el primer mensaje
+    # truncado. Una vez que tiene un título real, no se le vuelve a pedir uno
+    # nuevo en cada mensaje (serían llamadas de más, sin necesidad).
+    needs_title = thread.get("title") in (None, DEFAULT_THREAD_TITLE)
 
     server = build_mcp_server(db=db, user=user)
 
@@ -226,6 +287,11 @@ async def run_pokedex_chat(
     if not final_text:
         final_text = "No obtuve una respuesta del modelo, intenta de nuevo."
 
+    # Título con IA (Claude Haiku, ver `_generate_thread_title`) solo cuando
+    # hace falta — evita gastar una llamada extra en cada mensaje una vez que
+    # la conversación ya tiene un título real.
+    thread_title = await _generate_thread_title(anthropic_client, user_message, final_text) if needs_title else None
+
     # Guardar el turno en Firestore es "best effort" desde la perspectiva del
     # usuario: si falla (permisos, Firestore no disponible, etc.), Claude ya
     # respondió correctamente y esa respuesta se le entrega igual — solo no
@@ -243,6 +309,7 @@ async def run_pokedex_chat(
             user_message=user_message,
             assistant_reply=final_text,
             base_history=history,
+            title=thread_title,
         )
         persisted = True
     except HTTPException as exc:

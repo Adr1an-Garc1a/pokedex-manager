@@ -111,6 +111,24 @@ def _fake_chat_threads(monkeypatch):
     return store
 
 
+@pytest.fixture(autouse=True)
+def _no_ai_title_generation_by_default(monkeypatch):
+    """La mayoría de los tests de chat no le importa el título generado por
+    IA (`_generate_thread_title`, ver chat.py) y usan una cola compartida de
+    respuestas "falsas" de Claude (`_FakeAsyncAnthropic._shared_responses`)
+    con un tamaño exacto para el flujo de tools que están probando — sin
+    esto, cada uno de esos tests tendría que reservar además una respuesta
+    extra para la llamada de título, o reventaría con una lista vacía. Por
+    default se desactiva (devuelve None, así que se cae al recorte simple de
+    `firestore_client._make_title`); los tests que sí quieren probar la
+    generación de título la vuelven a parchar dentro de su propio cuerpo."""
+
+    async def fake_generate_thread_title(anthropic_client, user_message, assistant_reply):
+        return None
+
+    monkeypatch.setattr(chat_module, "_generate_thread_title", fake_generate_thread_title)
+
+
 def _fake_pikachu() -> PokemonDetail:
     return PokemonDetail(
         id=25,
@@ -407,10 +425,10 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
 
     saved_histories: list[list[dict]] = []
 
-    async def fake_get_thread_messages(user_id, thread_id):
-        return []
+    async def fake_get_thread(user_id, thread_id):
+        return {}
 
-    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
         history = [
             {"role": "user", "content": user_message, "ts": "now"},
             {"role": "assistant", "content": assistant_reply, "ts": "now"},
@@ -418,7 +436,7 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
         saved_histories.append(history)
         return history
 
-    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
     reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
@@ -470,16 +488,16 @@ async def test_run_pokedex_chat_handles_thinking_blocks(monkeypatch):
     monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
     monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
 
-    async def fake_get_thread_messages(user_id, thread_id):
-        return []
+    async def fake_get_thread(user_id, thread_id):
+        return {}
 
-    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
         return [
             {"role": "user", "content": user_message, "ts": "now"},
             {"role": "assistant", "content": assistant_reply, "ts": "now"},
         ]
 
-    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
     reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
@@ -513,13 +531,13 @@ async def test_run_pokedex_chat_survives_firestore_write_failure(monkeypatch):
     monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
     monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
 
-    async def fake_get_thread_messages(user_id, thread_id):
-        return []
+    async def fake_get_thread(user_id, thread_id):
+        return {}
 
-    async def fake_append_turn_fails(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn_fails(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
         raise HTTPException(status_code=503, detail="Firestore no disponible: 403 permisos")
 
-    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn_fails)
 
     reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
@@ -558,12 +576,12 @@ async def test_run_pokedex_chat_uses_client_history_when_firestore_has_none(monk
     monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
     monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
 
-    async def fake_get_thread_messages(user_id, thread_id):
-        return []  # Firestore "vacío" — simula que el guardado ha estado fallando
+    async def fake_get_thread(user_id, thread_id):
+        return {}  # Firestore "vacío" — simula que el guardado ha estado fallando
 
     append_calls: list[dict] = []
 
-    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
         append_calls.append({"base_history": base_history})
         merged = list(base_history or []) + [
             {"role": "user", "content": user_message, "ts": "now"},
@@ -571,7 +589,7 @@ async def test_run_pokedex_chat_uses_client_history_when_firestore_has_none(monk
         ]
         return merged
 
-    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
     client_history = [
@@ -703,13 +721,13 @@ async def test_run_pokedex_chat_generates_new_thread_id_when_none_given(monkeypa
     monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
     monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
 
-    async def fake_get_thread_messages(user_id, thread_id):
+    async def fake_get_thread(user_id, thread_id):
         # El thread_id generado se usa consistentemente para leer...
-        return []
+        return {}
 
     seen_thread_ids: list[str] = []
 
-    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
         # ...y para guardar.
         seen_thread_ids.append(thread_id)
         return [
@@ -717,7 +735,7 @@ async def test_run_pokedex_chat_generates_new_thread_id_when_none_given(monkeypa
             {"role": "assistant", "content": assistant_reply, "ts": "now"},
         ]
 
-    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
     reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
@@ -726,6 +744,105 @@ async def test_run_pokedex_chat_generates_new_thread_id_when_none_given(monkeypa
 
     assert thread_id
     assert seen_thread_ids == [thread_id]
+
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_run_pokedex_chat_generates_ai_title_for_new_thread(monkeypatch):
+    """Pedido explícito del usuario: en vez de dejar todas las conversaciones
+    nuevas con el título genérico "Nueva conversación" (o un simple recorte
+    del primer mensaje), se le pide a Claude Haiku un título real a partir
+    del primer intercambio — y ese título es el que se manda a `append_turn`."""
+    from app.db.session import SessionLocal
+    from app.models.user import User
+
+    db = SessionLocal()
+    user = User(google_sub="sub-chat-ai-title", email="aititle@example.com", name="T")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _FakeAsyncAnthropic._shared_responses = [
+        _FakeMessage(content=[_FakeTextBlock("¡Claro! Gloom está a nivel 20.")]),
+    ]
+    monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
+    monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
+
+    async def fake_get_thread(user_id, thread_id):
+        return {}  # conversación nueva: sin título todavía
+
+    async def fake_generate_thread_title(anthropic_client, user_message, assistant_reply):
+        assert "gloom" in user_message.lower()
+        return "Nivel de Gloom"
+
+    append_calls: list[dict] = []
+
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
+        append_calls.append({"title": title})
+        return [
+            {"role": "user", "content": user_message, "ts": "now"},
+            {"role": "assistant", "content": assistant_reply, "ts": "now"},
+        ]
+
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
+    monkeypatch.setattr(chat_module, "_generate_thread_title", fake_generate_thread_title)
+    monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
+
+    await chat_module.run_pokedex_chat(db=db, user=user, user_message="¿qué nivel tiene mi gloom?")
+
+    assert append_calls[0]["title"] == "Nivel de Gloom"
+
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_run_pokedex_chat_skips_ai_title_when_thread_already_has_one(monkeypatch):
+    """No se debe gastar una llamada extra a la IA pidiendo título en CADA
+    mensaje — solo cuando la conversación todavía no tiene uno real."""
+    from app.db.session import SessionLocal
+    from app.models.user import User
+
+    db = SessionLocal()
+    user = User(google_sub="sub-chat-no-retitle", email="noretitle@example.com", name="R")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _FakeAsyncAnthropic._shared_responses = [
+        _FakeMessage(content=[_FakeTextBlock("Tu Blastoise está en nivel 85.")]),
+    ]
+    monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
+    monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
+
+    async def fake_get_thread(user_id, thread_id):
+        return {
+            "title": "Mi equipo ideal",
+            "messages": [
+                {"role": "user", "content": "hola", "ts": "t1"},
+                {"role": "assistant", "content": "hola!", "ts": "t2"},
+            ],
+        }
+
+    async def fail_if_called(anthropic_client, user_message, assistant_reply):
+        raise AssertionError("no debía pedirse un título nuevo: la conversación ya tiene uno")
+
+    append_calls: list[dict] = []
+
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None, title=None):
+        append_calls.append({"title": title})
+        return (base_history or []) + [
+            {"role": "user", "content": user_message, "ts": "now"},
+            {"role": "assistant", "content": assistant_reply, "ts": "now"},
+        ]
+
+    monkeypatch.setattr(chat_module, "get_thread", fake_get_thread)
+    monkeypatch.setattr(chat_module, "_generate_thread_title", fail_if_called)
+    monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
+
+    await chat_module.run_pokedex_chat(db=db, user=user, user_message="¿nivel de mi blastoise?")
+
+    assert append_calls[0]["title"] is None
 
     db.close()
 

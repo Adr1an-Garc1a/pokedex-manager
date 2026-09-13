@@ -48,12 +48,18 @@ def _get_client():
     return _client_singleton
 
 
+DEFAULT_THREAD_TITLE = "Nueva conversación"
+
+
 def _make_title(user_message: str) -> str:
-    """Título derivado del primer mensaje del usuario en la conversación —
-    evita otra llamada al modelo solo para "resumir en un título"."""
+    """Título de RESPALDO, derivado con un simple recorte del mensaje del
+    usuario (sin IA) — se usa si no se pasó un título ya generado por Claude
+    (ver `chat.py`, `_generate_thread_title`) o si esa generación falló; así
+    una conversación nunca se queda pegada en "Nueva conversación" para
+    siempre solo porque, por ejemplo, la llamada de título a la API falló."""
     text = " ".join(user_message.strip().split())
     if not text:
-        return "Nueva conversación"
+        return DEFAULT_THREAD_TITLE
     return text if len(text) <= 40 else text[:39].rstrip() + "…"
 
 
@@ -79,7 +85,7 @@ async def list_threads(user_id: int) -> list[dict]:
     summaries = [
         {
             "id": thread_id,
-            "title": data.get("title") or "Nueva conversación",
+            "title": data.get("title") or DEFAULT_THREAD_TITLE,
             "created_at": data.get("created_at"),
             "updated_at": data.get("updated_at"),
             "message_count": len(data.get("messages", [])),
@@ -90,12 +96,21 @@ async def list_threads(user_id: int) -> list[dict]:
     return summaries
 
 
+async def get_thread(user_id: int, thread_id: str) -> dict:
+    """Título + mensajes de UNA conversación en una sola lectura (vacío si no
+    existe todavía). `chat.py` la usa para decidir, con una sola llamada a
+    Firestore, tanto el historial a mandarle a Claude como si hace falta
+    generarle un título nuevo a esta conversación."""
+    threads = await _get_threads_doc(user_id)
+    return threads.get(thread_id, {})
+
+
 async def get_thread_messages(user_id: int, thread_id: str) -> list[dict]:
     """Mensajes de UNA conversación en particular (vacío si no existe — por
     ejemplo, una conversación recién creada en el frontend que todavía no ha
     recibido su primer turno)."""
-    threads = await _get_threads_doc(user_id)
-    return threads.get(thread_id, {}).get("messages", [])
+    thread = await get_thread(user_id, thread_id)
+    return thread.get("messages", [])
 
 
 async def create_thread(user_id: int) -> dict:
@@ -119,7 +134,7 @@ async def create_thread(user_id: int) -> dict:
     """
     now = datetime.now(timezone.utc).isoformat()
     thread_id = uuid.uuid4().hex
-    thread_data = {"title": "Nueva conversación", "messages": [], "created_at": now, "updated_at": now}
+    thread_data = {"title": DEFAULT_THREAD_TITLE, "messages": [], "created_at": now, "updated_at": now}
     try:
         client = _get_client()
         doc_ref = client.collection(_COLLECTION).document(str(user_id))
@@ -143,12 +158,25 @@ async def append_turn(
     user_message: str,
     assistant_reply: str,
     base_history: list[dict] | None = None,
+    title: str | None = None,
 ) -> list[dict]:
     """Agrega el turno (mensaje del usuario + respuesta del asistente) a ESA
     conversación (`thread_id`) y devuelve su historial completo actualizado.
     Si la conversación no existía todavía (por ejemplo, el frontend mandó
-    `thread_id=None` y este es el primer mensaje), se crea aquí mismo, con un
-    título derivado de este primer mensaje.
+    `thread_id=None` y este es el primer mensaje), se crea aquí mismo.
+
+    `title`, si se pasa (ver `chat.py` — un título generado por IA para
+    conversaciones que todavía no tienen uno "real"), reemplaza cualquier
+    título existente. Si no se pasa, se conserva el título ya guardado —
+    A MENOS que ese título sea el genérico por defecto
+    (`DEFAULT_THREAD_TITLE`, "Nueva conversación", el que le pone
+    `create_thread` a una conversación recién creada): ese SIEMPRE se
+    reemplaza por `_make_title(user_message)` (un recorte simple, sin IA).
+    Bug real corregido: antes se hacía `existing.get("title") or
+    _make_title(...)`, y como "Nueva conversación" es una cadena no vacía
+    (osea "truthy"), esa condición nunca era `False` — el título genérico
+    se quedaba pegado PARA SIEMPRE, sin importar cuántos mensajes se
+    mandaran después, porque `_make_title` nunca llegaba a ejecutarse.
 
     `base_history`, si se pasa (ver chat.py — es el historial ya fusionado
     con lo que mandó el frontend), se usa como base en vez de releer el
@@ -176,8 +204,12 @@ async def append_turn(
             history = list(existing.get("messages", []))
         history.extend(new_messages)
 
+        existing_title = existing.get("title")
+        has_real_title = existing_title and existing_title != DEFAULT_THREAD_TITLE
+        final_title = title or (existing_title if has_real_title else _make_title(user_message))
+
         threads[thread_id] = {
-            "title": existing.get("title") or _make_title(user_message),
+            "title": final_title,
             "messages": history,
             "created_at": existing.get("created_at") or now,
             "updated_at": now,

@@ -194,9 +194,23 @@ solo botón "Reiniciar conversación" que la borraba por completo). Ahora:
   (mismo razonamiento de simplicidad de siempre: para el volumen de un chat
   personal, ni siquiera varias conversaciones justifican una subcolección
   aparte con su propio paginado).
-- El título de cada conversación se deriva del primer mensaje del usuario en
-  ella (recortado a 40 caracteres) — evita gastar otra llamada al modelo solo
-  para "resumir en un título".
+- El título de cada conversación se genera con IA (**Claude Haiku 4.5, fijo
+  y barato — independiente de `ANTHROPIC_MODEL`**, el modelo que se use para
+  conversar en sí) a partir de su primer intercambio real (mensaje del
+  usuario + primera respuesta de Claude), en vez de un simple recorte del
+  mensaje — así el título SÍ resume de qué se habló ("Nivel de mi Gloom" en
+  vez de "Y el nivel de mi gloom que..."). Solo se pide una vez por
+  conversación (cuando todavía no tiene un título "real"), no en cada
+  mensaje — y si esa llamada falla por lo que sea, se cae de vuelta a un
+  recorte simple del mensaje en vez de dejar la conversación sin título.
+  Bug real corregido de paso: antes, una conversación creada con "Iniciar
+  nueva conversación" se quedaba con el título genérico "Nueva conversación"
+  **para siempre**, sin importar cuántos mensajes se le mandaran — la
+  condición que debía reemplazarlo (`existing.get("title") or ...`) nunca se
+  disparaba porque "Nueva conversación" es una cadena no vacía (osea
+  "truthy"). Ahora ese título genérico se detecta explícitamente y siempre
+  se reemplaza (por el de la IA, o por el recorte de respaldo) en el primer
+  mensaje real de la conversación.
 - El frontend (`PokedexChatPage.tsx`) muestra la lista de conversaciones a un
   costado, con un botón "➕ Iniciar nueva conversación" arriba; hacer clic en
   cualquiera de la lista la vuelve la conversación activa y carga sus
