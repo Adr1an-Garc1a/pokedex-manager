@@ -62,6 +62,55 @@ def _fake_vision_history(monkeypatch):
     return store
 
 
+@pytest.fixture(autouse=True)
+def _fake_chat_threads(monkeypatch):
+    """Reemplaza el módulo de Firestore para las rutas de /ai/chat/threads por
+    un dict en memoria — mismo patrón que _fake_vision_history arriba. Cada
+    entrada de `store` es `user_id -> {thread_id: {title, messages, ...}}`."""
+    import uuid as uuid_module
+    from datetime import datetime, timezone
+
+    store: dict[int, dict[str, dict]] = {}
+
+    async def fake_list_threads(user_id):
+        threads = store.get(user_id, {})
+        summaries = [
+            {
+                "id": tid,
+                "title": t["title"],
+                "created_at": t["created_at"],
+                "updated_at": t["updated_at"],
+                "message_count": len(t["messages"]),
+            }
+            for tid, t in threads.items()
+        ]
+        summaries.sort(key=lambda s: s["updated_at"] or "", reverse=True)
+        return summaries
+
+    async def fake_get_thread_messages(user_id, thread_id):
+        return store.get(user_id, {}).get(thread_id, {}).get("messages", [])
+
+    async def fake_create_thread(user_id):
+        now = datetime.now(timezone.utc).isoformat()
+        thread_id = uuid_module.uuid4().hex
+        store.setdefault(user_id, {})[thread_id] = {
+            "title": "Nueva conversación",
+            "messages": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        return {"id": thread_id, "title": "Nueva conversación", "created_at": now, "updated_at": now, "message_count": 0}
+
+    async def fake_delete_thread(user_id, thread_id):
+        store.get(user_id, {}).pop(thread_id, None)
+
+    monkeypatch.setattr(ai_module, "list_threads", fake_list_threads)
+    monkeypatch.setattr(ai_module, "get_thread_messages", fake_get_thread_messages)
+    monkeypatch.setattr(ai_module, "create_thread", fake_create_thread)
+    monkeypatch.setattr(ai_module, "delete_thread", fake_delete_thread)
+    return store
+
+
 def _fake_pikachu() -> PokemonDetail:
     return PokemonDetail(
         id=25,
@@ -358,10 +407,10 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
 
     saved_histories: list[list[dict]] = []
 
-    async def fake_get_conversation(user_id):
+    async def fake_get_thread_messages(user_id, thread_id):
         return []
 
-    async def fake_append_turn(user_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
         history = [
             {"role": "user", "content": user_message, "ts": "now"},
             {"role": "assistant", "content": assistant_reply, "ts": "now"},
@@ -369,16 +418,17 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
         saved_histories.append(history)
         return history
 
-    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
-    reply, history, persisted = await chat_module.run_pokedex_chat(
+    reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
         db=db, user=user, user_message="¿cuántos pokémon tengo?"
     )
 
     assert "1 Pokémon" in reply
     assert history == saved_histories[0]
     assert persisted is True
+    assert thread_id  # se generó uno nuevo (no se pasó ninguno)
     # Confirma que el loop de tool_use en chat.py llamó a Claude exactamente dos
     # veces (tool_use -> ejecuta la tool MCP -> le manda el resultado -> texto final).
     assert len(_FakeAsyncAnthropic.last_instance.messages.create_calls) == 2
@@ -420,19 +470,19 @@ async def test_run_pokedex_chat_handles_thinking_blocks(monkeypatch):
     monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
     monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
 
-    async def fake_get_conversation(user_id):
+    async def fake_get_thread_messages(user_id, thread_id):
         return []
 
-    async def fake_append_turn(user_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
         return [
             {"role": "user", "content": user_message, "ts": "now"},
             {"role": "assistant", "content": assistant_reply, "ts": "now"},
         ]
 
-    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
-    reply, history, persisted = await chat_module.run_pokedex_chat(
+    reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
         db=db, user=user, user_message="¿cuántos pokémon tengo?"
     )
 
@@ -463,16 +513,16 @@ async def test_run_pokedex_chat_survives_firestore_write_failure(monkeypatch):
     monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
     monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
 
-    async def fake_get_conversation(user_id):
+    async def fake_get_thread_messages(user_id, thread_id):
         return []
 
-    async def fake_append_turn_fails(user_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn_fails(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
         raise HTTPException(status_code=503, detail="Firestore no disponible: 403 permisos")
 
-    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn_fails)
 
-    reply, history, persisted = await chat_module.run_pokedex_chat(
+    reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
         db=db, user=user, user_message="hola"
     )
 
@@ -508,12 +558,12 @@ async def test_run_pokedex_chat_uses_client_history_when_firestore_has_none(monk
     monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
     monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
 
-    async def fake_get_conversation(user_id):
+    async def fake_get_thread_messages(user_id, thread_id):
         return []  # Firestore "vacío" — simula que el guardado ha estado fallando
 
     append_calls: list[dict] = []
 
-    async def fake_append_turn(user_id, *, user_message, assistant_reply, base_history=None):
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
         append_calls.append({"base_history": base_history})
         merged = list(base_history or []) + [
             {"role": "user", "content": user_message, "ts": "now"},
@@ -521,7 +571,7 @@ async def test_run_pokedex_chat_uses_client_history_when_firestore_has_none(monk
         ]
         return merged
 
-    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
     client_history = [
@@ -529,7 +579,7 @@ async def test_run_pokedex_chat_uses_client_history_when_firestore_has_none(monk
         {"role": "assistant", "content": "¡Genial, Pikachu es un gran Pokémon!", "ts": "2026-01-01T00:00:01"},
     ]
 
-    reply, history, persisted = await chat_module.run_pokedex_chat(
+    reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
         db=db, user=user, user_message="¿cuál dije que era mi favorito?", client_history=client_history
     )
 
@@ -558,6 +608,126 @@ def test_root_cause_unwraps_task_group_exception_group():
     assert chat_module._root_cause(wrapped) is real_error
     # Y una excepción normal (no agrupada) se devuelve tal cual.
     assert chat_module._root_cause(real_error) is real_error
+
+
+# --- 2b. Conversaciones múltiples ("Iniciar nueva conversación") -------------
+
+
+def test_chat_threads_empty_for_new_user(client, monkeypatch):
+    token = _register_and_get_token(
+        client, monkeypatch, sub="sub-threads-1", email="threads1@example.com", name="Hilos Uno"
+    )
+    response = client.get("/api/v1/ai/chat/threads", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_chat_create_thread_appears_in_list_and_starts_empty(client, monkeypatch):
+    token = _register_and_get_token(
+        client, monkeypatch, sub="sub-threads-2", email="threads2@example.com", name="Hilos Dos"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    create_response = client.post("/api/v1/ai/chat/threads", headers=headers)
+    assert create_response.status_code == 201, create_response.text
+    thread = create_response.json()
+    assert thread["message_count"] == 0
+    assert thread["title"] == "Nueva conversación"
+
+    list_response = client.get("/api/v1/ai/chat/threads", headers=headers)
+    assert list_response.status_code == 200
+    assert [t["id"] for t in list_response.json()] == [thread["id"]]
+
+    messages_response = client.get(
+        f"/api/v1/ai/chat/threads/{thread['id']}", headers=headers
+    )
+    assert messages_response.status_code == 200
+    assert messages_response.json() == []
+
+
+def test_chat_delete_thread_removes_it_but_not_others(client, monkeypatch):
+    token = _register_and_get_token(
+        client, monkeypatch, sub="sub-threads-3", email="threads3@example.com", name="Hilos Tres"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    thread_a = client.post("/api/v1/ai/chat/threads", headers=headers).json()
+    thread_b = client.post("/api/v1/ai/chat/threads", headers=headers).json()
+
+    delete_response = client.delete(
+        f"/api/v1/ai/chat/threads/{thread_a['id']}", headers=headers
+    )
+    assert delete_response.status_code == 204
+
+    remaining = client.get("/api/v1/ai/chat/threads", headers=headers).json()
+    assert [t["id"] for t in remaining] == [thread_b["id"]]
+
+
+def test_chat_threads_are_isolated_between_users(client, monkeypatch):
+    """El mismo bug de fondo que el reporte de fuga de datos en Insights: dos
+    cuentas distintas nunca deben ver las conversaciones (ni los mensajes) de
+    la otra."""
+    token_a = _register_and_get_token(
+        client, monkeypatch, sub="sub-threads-user-a", email="threads-a@example.com", name="Usuaria A"
+    )
+    token_b = _register_and_get_token(
+        client, monkeypatch, sub="sub-threads-user-b", email="threads-b@example.com", name="Usuario B"
+    )
+
+    client.post("/api/v1/ai/chat/threads", headers={"Authorization": f"Bearer {token_a}"})
+
+    threads_for_b = client.get(
+        "/api/v1/ai/chat/threads", headers={"Authorization": f"Bearer {token_b}"}
+    )
+    assert threads_for_b.status_code == 200
+    assert threads_for_b.json() == []
+
+
+@pytest.mark.asyncio
+async def test_run_pokedex_chat_generates_new_thread_id_when_none_given(monkeypatch):
+    """Primer mensaje de una conversación nueva: no se manda thread_id, y el
+    backend debe generar uno (para que el frontend lo adopte como la
+    conversación activa) en vez de dejarlo vacío."""
+    from app.db.session import SessionLocal
+    from app.models.user import User
+
+    db = SessionLocal()
+    user = User(google_sub="sub-chat-new-thread", email="newthread@example.com", name="N")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _FakeAsyncAnthropic._shared_responses = [
+        _FakeMessage(content=[_FakeTextBlock("¡Hola! Soy nuevo por aquí.")]),
+    ]
+    monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
+    monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
+
+    async def fake_get_thread_messages(user_id, thread_id):
+        # El thread_id generado se usa consistentemente para leer...
+        return []
+
+    seen_thread_ids: list[str] = []
+
+    async def fake_append_turn(user_id, thread_id, *, user_message, assistant_reply, base_history=None):
+        # ...y para guardar.
+        seen_thread_ids.append(thread_id)
+        return [
+            {"role": "user", "content": user_message, "ts": "now"},
+            {"role": "assistant", "content": assistant_reply, "ts": "now"},
+        ]
+
+    monkeypatch.setattr(chat_module, "get_thread_messages", fake_get_thread_messages)
+    monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
+
+    reply, history, persisted, thread_id = await chat_module.run_pokedex_chat(
+        db=db, user=user, user_message="hola"
+    )
+
+    assert thread_id
+    assert seen_thread_ids == [thread_id]
+
+    db.close()
 
 
 # --- 3. Insights -------------------------------------------------------------

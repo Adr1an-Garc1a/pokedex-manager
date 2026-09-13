@@ -1,6 +1,7 @@
 import { fetchCurrentUser, loginWithGoogle, registerWithGoogle } from "@/api/auth";
 import { clearToken, getToken, saveToken } from "@/api/client";
 import type { User } from "@/types";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   useCallback,
@@ -28,6 +29,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const token = getToken();
@@ -56,7 +58,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearToken();
     setUser(null);
-  }, []);
+    // Defensa adicional contra fugas de datos entre cuentas: aunque cada
+    // queryKey relevante ya lleva el id de usuario (ver InsightsPage.tsx,
+    // VisionIdentifyPage.tsx, etc. — la corrección real del bug reportado),
+    // limpiar TODO el caché de React Query al cerrar sesión garantiza que
+    // ninguna respuesta cacheada (de esta cuenta, o de una key que se nos
+    // olvide escopar en el futuro) pueda sobrevivir a la próxima cuenta que
+    // inicie sesión en esta misma pestaña.
+    queryClient.clear();
+  }, [queryClient]);
 
   const value = useMemo(
     () => ({ user, isLoading, loginWithGoogleIdToken, registerWithGoogleIdToken, logout }),

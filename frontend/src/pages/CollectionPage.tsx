@@ -6,11 +6,14 @@ import {
 } from "@/api/collection";
 import { PokeballSpinner } from "@/components/PokeballSpinner";
 import { TypeBadge } from "@/components/TypeBadge";
+import { useAuth } from "@/context/AuthContext";
 import type { CollectionEntry } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 export function CollectionPage() {
+  const { user } = useAuth();
+  const userId = user?.id;
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ nickname: string; level: string; notes: string }>({
@@ -19,14 +22,18 @@ export function CollectionPage() {
     notes: "",
   });
 
+  // El id de usuario va en la queryKey para que cambiar de cuenta (sin cerrar
+  // el navegador) nunca sirva de caché los datos de la cuenta anterior.
   const { data: entries, isLoading } = useQuery({
-    queryKey: ["collection"],
+    queryKey: ["collection", userId],
     queryFn: listMyCollection,
+    enabled: !!userId,
   });
 
   const { data: stats } = useQuery({
-    queryKey: ["collection", "stats"],
+    queryKey: ["collection", "stats", userId],
     queryFn: getCollectionStats,
+    enabled: !!userId,
   });
 
   const deleteMutation = useMutation({

@@ -14,14 +14,28 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
  * (caché local, ver utils/visionHistoryCache.ts) con lo que devuelve el
  * backend — así el historial se ve completo (y sobrevive a navegar a otra
  * sección o recargar la página) incluso si el guardado en Firestore fallara
- * para alguna consulta en particular. */
+ * para alguna consulta en particular.
+ *
+ * `preferred` gana cuando la misma consulta (mismo `entry_id`/`image_url`)
+ * aparece en ambos arreglos. Bug real reportado: la bandera "no guardado"
+ * (`history_persisted: false`) de una identificación que en su momento no
+ * se pudo guardar quedaba fija PARA SIEMPRE en localStorage — y como antes
+ * se llamaba `mergeHistory(cachéLocal, servidor)`, esa copia local vieja
+ * siempre ganaba, así que aunque Firestore ya tuviera guardada esa misma
+ * consulta con `history_persisted: true` (guardado exitoso más tarde, o el
+ * dato ya estaba bien desde un inicio), el usuario seguía viendo "⚠️ no
+ * guardado" sin importar cuánto tiempo pasara ni si cerraba sesión — el
+ * caché local nunca se "enteraba" de que el servidor ya tenía la versión
+ * correcta. Ahora quien llama pasa primero la fuente en la que más confía
+ * (el servidor, cuando ya respondió) para que si el mismo `entry_id` existe
+ * en ambos lados, gane siempre el dato confirmado por Firestore. */
 function mergeHistory(
-  local: PokemonVisionResult[],
-  server: PokemonVisionResult[]
+  preferred: PokemonVisionResult[],
+  fallback: PokemonVisionResult[]
 ): PokemonVisionResult[] {
   const seen = new Set<string>();
   const merged: PokemonVisionResult[] = [];
-  for (const row of [...local, ...server]) {
+  for (const row of [...preferred, ...fallback]) {
     const key = row.entry_id ?? row.image_url;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -33,6 +47,7 @@ function mergeHistory(
 export function VisionIdentifyPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const userId = user?.id;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -44,25 +59,34 @@ export function VisionIdentifyPage() {
     user ? loadCachedVisionHistory(user.id) : []
   );
 
+  // Las queryKey llevan el id del usuario: sin esto, cambiar de cuenta en la
+  // misma sesión del navegador podía seguir mostrando (por un instante, o si
+  // el refetch tardaba) los datos EN CACHÉ de la cuenta anterior — mismo bug
+  // de fondo reportado en Insights. Con el id en la key, cada cuenta tiene su
+  // propia entrada de caché de React Query, nunca comparten una.
   const { data: myCollection } = useQuery({
-    queryKey: ["collection", "ids-only"],
+    queryKey: ["collection", "ids-only", userId],
     queryFn: listMyCollection,
+    enabled: !!userId,
   });
   const ownedIds = new Set((myCollection ?? []).map((entry) => entry.pokemon_id));
 
   const { data: serverHistory, isLoading: historyLoading } = useQuery({
-    queryKey: ["ai", "vision-history"],
+    queryKey: ["ai", "vision-history", userId],
     queryFn: getVisionHistory,
+    enabled: !!userId,
   });
 
   // Cuando llega (o cambia) el historial del backend, se fusiona con el
-  // caché local y se vuelve a guardar en localStorage — así el caché se
-  // "autocura" con lo que Firestore sí pudo confirmar, sin perder nunca lo
-  // que ya se había identificado en este dispositivo.
+  // caché local y se vuelve a guardar en localStorage — el SERVIDOR gana en
+  // caso de conflicto (ver el porqué en el docstring de mergeHistory arriba)
+  // para que el caché se "autocure" de verdad con lo que Firestore confirmó,
+  // sin perder nunca lo que ya se había identificado en este dispositivo y
+  // aún no se refleja en el servidor.
   useEffect(() => {
     if (!user || !serverHistory) return;
     setCachedResults((prev) => {
-      const merged = mergeHistory(prev, serverHistory);
+      const merged = mergeHistory(serverHistory, prev);
       saveCachedVisionHistory(user.id, merged);
       return merged;
     });

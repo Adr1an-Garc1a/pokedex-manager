@@ -70,12 +70,21 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
+    thread_id: str | None = Field(
+        default=None,
+        description=(
+            "ID de la conversación a continuar (una de las que devuelve GET /ai/chat/threads). "
+            "None para que el backend cree una conversación nueva automáticamente (primer "
+            "mensaje de un usuario que todavía no tiene ninguna, o cuando el frontend manda "
+            "explícitamente 'Iniciar nueva conversación' sin pre-crear el hilo)."
+        ),
+    )
     client_history: list[ChatMessage] = Field(
         default_factory=list,
         description=(
-            "Copia local (frontend) del historial de esta conversación — se fusiona con lo que "
-            "Firestore tenga guardado, para que el contexto de la conversación sobreviva aunque "
-            "el guardado en Firestore esté fallando (ver docs/BONUS_FEATURES.md)"
+            "Copia local (frontend) del historial de ESTA conversación (mismo thread_id) — se "
+            "fusiona con lo que Firestore tenga guardado, para que el contexto de la conversación "
+            "sobreviva aunque el guardado en Firestore esté fallando (ver docs/BONUS_FEATURES.md)"
         ),
     )
 
@@ -83,6 +92,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     history: list[ChatMessage]
+    thread_id: str = Field(description="ID de la conversación (nuevo o el que se venía usando)")
     history_persisted: bool = Field(
         default=True,
         description=(
@@ -90,6 +100,18 @@ class ChatResponse(BaseModel):
             "(el chat sigue funcionando igual, solo no queda guardado para la próxima vez)"
         ),
     )
+
+
+class ChatThreadSummary(BaseModel):
+    """Una conversación en la lista de 'todas mis conversaciones' — sin los
+    mensajes completos (esos se piden aparte, GET /ai/chat/threads/{id}, solo
+    cuando el usuario abre esa conversación en particular)."""
+
+    id: str
+    title: str = Field(description="Derivado del primer mensaje del usuario en esta conversación")
+    created_at: str | None = None
+    updated_at: str | None = None
+    message_count: int = 0
 
 
 # --- 3. Insights de colección (Gemini 2.5 Flash) --------------------------

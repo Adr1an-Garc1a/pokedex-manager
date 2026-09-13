@@ -79,10 +79,54 @@ donde es fácil encontrarlo, fuerte/débil contra en español) y el botón de
 agregar a la colección; debajo, el historial completo (`VisionIdentifyPage.tsx`)
 se muestra como una tabla con esas mismas columnas.
 
+### Por qué el aviso "no guardado" se quedaba pegado para siempre
+
+Bug real reportado: el aviso "⚠️ no guardado" (`history_persisted: false`)
+aparecía en una fila del historial y ya no se quitaba nunca — ni cerrando
+sesión y volviendo a entrar. **Esto era un bug de frontend, no reflejaba un
+fallo real y continuo de Firestore.**
+
+La causa: `VisionIdentifyPage.tsx` fusiona el historial guardado en
+`localStorage` (respaldo local) con el que devuelve el backend
+(`mergeHistory`), y en un empate (misma consulta, mismo `entry_id`) la
+función se queda con el PRIMER arreglo que recibe. La llamada original era
+`mergeHistory(cachéLocal, servidor)` — es decir, la copia local siempre
+ganaba. Si en el momento de identificar un Pokémon el guardado en Firestore
+falló (y por eso esa entrada quedó en localStorage con
+`history_persisted: false`), esa bandera quedaba fija ahí para siempre: aun
+cuando Firestore se recuperara y esa misma consulta ya existiera del lado
+del servidor con `history_persisted: true`, la copia local vieja seguía
+ganando el "empate" y el usuario nunca dejaba de ver el aviso — cerrar sesión
+tampoco ayudaba porque el caché de `localStorage` sobrevive entre sesiones (a
+propósito, es el respaldo).
+
+**El fix:** se invirtió el orden — ahora se llama `mergeHistory(servidor,
+cachéLocal)`, así que si la misma consulta existe en ambos lados, gana
+siempre la versión que confirmó el servidor (Firestore, la fuente de verdad),
+y la copia local solo se usa para lo que el servidor todavía no tiene. Con
+esto, cualquier entrada vieja con la bandera mal puesta se corrige sola la
+próxima vez que se cargue el historial y Firestore ya tenga la versión
+correcta — no hace falta ninguna acción manual ni migrar datos existentes.
+
+Dicho esto: si una fila *sigue* mostrando el aviso después de este fix, esa
+sí es una señal real de que el guardado de ESA consulta en particular nunca
+llegó a Firestore (revisar el mismo checklist de permisos de IAM que la
+sección de troubleshooting del chat, arriba) — la diferencia es que ahora el
+aviso refleja el estado real, en vez de un dato viejo atorado en el navegador.
+
 ## 2. Chat MCP — Claude sobre tu colección
 
-`POST /api/v1/ai/chat` (body `{"message": "..."}`, requiere sesión) · `GET` /
-`DELETE /api/v1/ai/chat/history`.
+`POST /api/v1/ai/chat` (body `{"message": "...", "thread_id": "..." | null,
+"client_history": [...]}`, requiere sesión) para hablar con la IA, más un
+CRUD chico de **conversaciones** (varias por usuario, no solo una):
+
+- `GET /api/v1/ai/chat/threads` — todas tus conversaciones (id, título,
+  fecha, cantidad de mensajes), más reciente primero.
+- `POST /api/v1/ai/chat/threads` — "Iniciar nueva conversación": crea una
+  vacía y devuelve su id.
+- `GET /api/v1/ai/chat/threads/{id}` — mensajes de una conversación puntual.
+- `DELETE /api/v1/ai/chat/threads/{id}` — borra una conversación (las demás
+  quedan intactas).
 
 ### Por qué Anthropic directo (y no Claude vía Vertex AI Model Garden)
 
@@ -113,26 +157,55 @@ sin necesidad real para esta app. En su lugar, **por cada mensaje de chat**:
    transporte de red que tendría un servidor MCP standalone (stdio o HTTP).
 3. Se listan las tools del servidor y se traducen al formato de `tools` de la
    API de Claude.
-4. Se llama a Claude con el historial + el mensaje nuevo. Ese historial NO
-   sale solo de Firestore: se fusiona (`chat.py`, `_merge_history`) con
-   `client_history`, la copia local que manda el frontend en cada request
-   (`utils/chatHistoryCache.ts`, guardada en `localStorage` por cuenta de
-   usuario) — así, si el guardado en Firestore ha estado fallando, Claude
-   sigue teniendo el contexto real de la conversación en vez de "olvidarlo"
-   en cada mensaje nuevo. Si Claude responde con `tool_use`, la tool se
-   ejecuta a través del `ClientSession` MCP (no se llama directo a una
-   función de Python) y su resultado se le devuelve a Claude como
-   `tool_result`; esto se repite hasta que responde con texto final (tope de
-   5 iteraciones).
-5. El turno completo se guarda en Firestore, usando como base la versión ya
-   fusionada del punto anterior (no lo que Firestore tenía guardado antes) —
-   así el documento se "autocura" con la versión más completa disponible en
-   vez de perpetuar un hueco de mensajes perdidos. Es **best effort**: si
-   Firestore falla (por ejemplo, un problema de permisos), Claude ya
-   respondió correctamente y esa respuesta se le entrega igual al usuario
-   (`history_persisted: false` en la respuesta), solo no queda guardada del
-   lado del servidor — el frontend sigue viéndola igual, porque ya la tiene
-   en su copia local.
+4. Se llama a Claude con el historial DE ESA CONVERSACIÓN (`thread_id`) + el
+   mensaje nuevo. Ese historial NO sale solo de Firestore: se fusiona
+   (`chat.py`, `_merge_history`) con `client_history`, la copia local que
+   manda el frontend en cada request (`utils/chatHistoryCache.ts`, guardada
+   en `localStorage` por cuenta de usuario Y por conversación) — así, si el
+   guardado en Firestore ha estado fallando, Claude sigue teniendo el
+   contexto real de la conversación en vez de "olvidarlo" en cada mensaje
+   nuevo. Si `thread_id` viene `null` (usuario sin ninguna conversación
+   todavía), se genera uno nuevo aquí mismo y se devuelve en la respuesta —
+   el frontend lo adopta como la conversación activa. Si Claude responde con
+   `tool_use`, la tool se ejecuta a través del `ClientSession` MCP (no se
+   llama directo a una función de Python) y su resultado se le devuelve a
+   Claude como `tool_result`; esto se repite hasta que responde con texto
+   final (tope de 5 iteraciones).
+5. El turno completo se guarda en Firestore, EN ESA CONVERSACIÓN, usando como
+   base la versión ya fusionada del punto anterior (no lo que Firestore tenía
+   guardado antes) — así el documento se "autocura" con la versión más
+   completa disponible en vez de perpetuar un hueco de mensajes perdidos. Es
+   **best effort**: si Firestore falla (por ejemplo, un problema de
+   permisos), Claude ya respondió correctamente y esa respuesta se le
+   entrega igual al usuario (`history_persisted: false` en la respuesta),
+   solo no queda guardada del lado del servidor — el frontend sigue viéndola
+   igual, porque ya la tiene en su copia local.
+
+### Varias conversaciones por usuario ("Iniciar nueva conversación")
+
+Al usuario le hacía falta poder "hablar de otra cosa" con Claude sin perder
+el hilo anterior, y poder ver y retomar cualquier conversación pasada — antes
+solo existía UNA conversación por usuario (un solo documento en Firestore, un
+solo botón "Reiniciar conversación" que la borraba por completo). Ahora:
+
+- Firestore guarda, por usuario, un **dict de conversaciones**
+  (`threads: {thread_id: {title, messages, created_at, updated_at}}`) en vez
+  de un solo array `messages` — sigue siendo un único documento por usuario
+  (mismo razonamiento de simplicidad de siempre: para el volumen de un chat
+  personal, ni siquiera varias conversaciones justifican una subcolección
+  aparte con su propio paginado).
+- El título de cada conversación se deriva del primer mensaje del usuario en
+  ella (recortado a 40 caracteres) — evita gastar otra llamada al modelo solo
+  para "resumir en un título".
+- El frontend (`PokedexChatPage.tsx`) muestra la lista de conversaciones a un
+  costado, con un botón "➕ Iniciar nueva conversación" arriba; hacer clic en
+  cualquiera de la lista la vuelve la conversación activa y carga sus
+  mensajes (con el mismo patrón de caché local + fusión con el servidor que
+  ya existía, ahora con una entrada de `localStorage` por conversación en vez
+  de una sola por usuario).
+- Borrar una conversación (🗑️ en la lista) solo la quita a ELLA — las demás
+  quedan intactas, a diferencia del viejo "Reiniciar conversación" que
+  borraba la única que existía.
 
 ```mermaid
 sequenceDiagram
@@ -143,9 +216,9 @@ sequenceDiagram
     participant C as Claude (Anthropic)
     participant FS as Firestore
 
-    U->>FE: Escribe una pregunta
-    FE->>BE: POST /ai/chat {message, client_history}
-    BE->>FS: Cargar historial
+    U->>FE: Escribe una pregunta (en la conversación activa)
+    FE->>BE: POST /ai/chat {message, thread_id, client_history}
+    BE->>FS: Cargar historial DE ESE thread_id (o generar uno nuevo si venía null)
     Note over BE: se fusiona con client_history
     BE->>MCP: Levantar servidor + ClientSession
     BE->>C: messages.create(tools=[...], historial fusionado + mensaje)
@@ -158,9 +231,9 @@ sequenceDiagram
     else responde directo
         C-->>BE: respuesta final en texto
     end
-    BE->>FS: Guardar turno (sobre el historial ya fusionado)
-    BE-->>FE: {reply, history, history_persisted}
-    FE->>FE: guarda `history` en localStorage
+    BE->>FS: Guardar turno en ESE thread_id (sobre el historial ya fusionado)
+    BE-->>FE: {reply, history, thread_id, history_persisted}
+    FE->>FE: guarda `history` en localStorage (por usuario + thread_id)
 ```
 
 ### Solución de problemas — "el chat no funciona"
@@ -198,6 +271,11 @@ endpoint completo respondía 503 igual, descartando la respuesta ya generada.
 Ahora ese guardado es "best effort": la respuesta se entrega siempre que
 Claude haya respondido, con `history_persisted: false` si no se pudo
 guardar (el frontend muestra un aviso pequeño, no bloqueante).
+
+**4. El aviso "⚠️ no guardado" de Vision se quedaba pegado para siempre,
+incluso cerrando sesión.** Este era un bug real de FRONTEND, no de
+Firestore — ver la sección de Vision más abajo ("Por qué el aviso 'no
+guardado' se quedaba pegado") para el detalle completo.
 
 Si ves el error de Firestore específicamente
 (`Firestore no disponible... 403 Missing or insufficient permissions`),
@@ -246,8 +324,12 @@ Es la opción serverless natural de GCP para este dato: documentos de tamaño
 variable, sin necesidad de joins ni transacciones complejas, cero
 administración (a diferencia de añadir esto a Cloud SQL, no hay que migrar un
 esquema para "una conversación que crece"). Un documento por usuario en la
-colección `mcp_conversations`, con el array completo de mensajes — para el
-volumen de un chat personal esto es más simple que paginar una subcolección.
+colección `mcp_conversations`, con un dict `threads: {thread_id: {title,
+messages, created_at, updated_at}}` — una entrada por conversación — en vez
+del array único `messages` de la primera versión (que solo soportaba una
+conversación por usuario). Sigue siendo un solo documento por usuario (no una
+subcolección `threads/{id}` aparte): para el volumen de un chat personal esto
+es más simple que paginar, y evita administrar una subcolección extra.
 Esto no contradice la decisión de usar Cloud SQL para los datos core (ver
 `docs/ARCHITECTURE.md`): son dos tipos de dato distintos.
 
@@ -286,6 +368,43 @@ principio que Vision: nunca se le pide al modelo una URL de imagen, solo un
 nombre, y la imagen sale de la fuente de verdad. El "equipo analizado" (tus
 primeros 6) ni siquiera se resuelve: sale directo de tu colección en la base
 de datos, así que sus imágenes son siempre exactas.
+
+### Bug real corregido: Insights (y otras páginas) mostraban datos de OTRA cuenta
+
+Bug reportado, con capturas: al cambiar de cuenta en el mismo navegador (sin
+cerrar la pestaña), la sección de Insights mostraba el análisis de la cuenta
+ANTERIOR — un Pokémon que la cuenta nueva ni siquiera tiene en su colección.
+
+**Causa real:** el backend siempre respondió correctamente por cuenta (esto
+nunca fue un bug de datos ni de permisos); el problema estaba enteramente en
+el frontend, en cómo React Query cachea las respuestas. Cada `useQuery` cachea
+por su `queryKey`, y la key de Insights era simplemente `["ai", "insights"]`
+— sin ningún identificador de la cuenta. Como las dos cuentas de prueba
+comparten la misma pestaña/sesión del navegador, ambas terminaban leyendo (y
+escribiendo) la MISMA entrada de caché: la cuenta nueva podía ver, aunque
+fuera brevemente, la respuesta que había quedado cacheada de la cuenta
+anterior. Se auditó el resto de la app y se encontró la misma clase de bug
+(key sin id de usuario) en el historial de Vision, el historial/hilos del
+chat, y las páginas de colección/Pokédex.
+
+**El fix, en dos capas:**
+
+1. **La corrección real:** toda `queryKey` que depende de la cuenta que tiene
+   la sesión iniciada ahora incluye `user?.id` — `["ai", "insights",
+   user.id]`, `["ai", "vision-history", user.id]`, `["ai", "chat-threads",
+   user.id]`, `["collection", user.id]`, etc. Con el id en la key, cada
+   cuenta tiene su propia entrada de caché — nunca pueden compartir ni
+   "heredar" una de la otra, sin importar en qué orden se inicie sesión.
+2. **Defensa adicional:** `AuthContext.tsx` ahora llama a
+   `queryClient.clear()` al cerrar sesión (`logout()`), que vacía TODO el
+   caché de React Query — así, aunque en el futuro se agregue una query
+   nueva y alguien olvide escoparla por usuario, cerrar sesión sigue
+   garantizando que ninguna respuesta de la cuenta anterior sobreviva a la
+   siguiente que inicie sesión en esa misma pestaña.
+
+Hay un test de backend nuevo (`test_chat_threads_are_isolated_between_users`)
+que confirma que el backend, por su parte, nunca mezcla datos entre cuentas —
+la fuga estaba solo en el caché del frontend, no en el API.
 
 ## Configuración (una sola vez)
 

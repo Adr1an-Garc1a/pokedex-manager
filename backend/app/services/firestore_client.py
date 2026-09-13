@@ -10,10 +10,16 @@ serverless más, mismo patrón de "un recurso de GCP por responsabilidad" que
 Cloud SQL (datos relacionales), GCS (imágenes) y Secret Manager (secretos).
 
 Modelo de datos: una colección `mcp_conversations`, un documento por usuario
-(id = str(user.id)), con un solo campo `messages`: la lista completa de
-turnos {role, content, ts}. Para el volumen de un chat personal (decenas o
-cientos de mensajes) esto es más simple que una subcolección por mensaje, y
-evita tener que paginar al cargar el historial completo del chat.
+(id = str(user.id)), con un solo campo `threads`: un dict `{thread_id: {...}}`
+donde cada conversación tiene su propio `title`, `messages` (lista completa
+de turnos {role, content, ts}), `created_at` y `updated_at`. Antes había un
+solo array `messages` a nivel de usuario (una sola conversación posible);
+esto pasó a un dict de conversaciones para soportar "Iniciar nueva
+conversación" + poder ver/retomar cualquier conversación anterior, pedido
+explícito del usuario. Se mantiene como UN SOLO documento (no una
+subcolección `threads/{id}`) por el mismo motivo original: para el volumen de
+un chat personal esto es más simple (una sola lectura/escritura, sin
+paginar) y sigue evitando tener que administrar una subcolección aparte.
 
 Import perezoso de `google.cloud.firestore` — mismo motivo que gemini_client.py
 y storage.py: el backend debe poder arrancar (y correr sus tests) sin
@@ -22,6 +28,7 @@ credenciales de GCP configuradas.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -41,31 +48,90 @@ def _get_client():
     return _client_singleton
 
 
-async def get_conversation(user_id: int) -> list[dict]:
-    """Devuelve el historial de mensajes del usuario (vacío si nunca ha chateado
-    o si Firestore no está configurado en este entorno — se degrada con
-    gracia en vez de tumbar la carga del widget de chat)."""
+def _make_title(user_message: str) -> str:
+    """Título derivado del primer mensaje del usuario en la conversación —
+    evita otra llamada al modelo solo para "resumir en un título"."""
+    text = " ".join(user_message.strip().split())
+    if not text:
+        return "Nueva conversación"
+    return text if len(text) <= 40 else text[:39].rstrip() + "…"
+
+
+async def _get_threads_doc(user_id: int) -> dict:
+    """Todas las conversaciones (crudas, sin recortar) del usuario. Vacío si
+    nunca ha chateado o si Firestore no está disponible en este entorno."""
     try:
         client = _get_client()
         doc = await client.collection(_COLLECTION).document(str(user_id)).get()
     except Exception:
-        logger.warning("No se pudo leer el historial de chat desde Firestore", exc_info=True)
-        return []
+        logger.warning("No se pudo leer las conversaciones de chat desde Firestore", exc_info=True)
+        return {}
 
     if not doc.exists:
-        return []
-    return doc.to_dict().get("messages", [])
+        return {}
+    return doc.to_dict().get("threads", {})
+
+
+async def list_threads(user_id: int) -> list[dict]:
+    """Resumen de TODAS las conversaciones del usuario (sin sus mensajes),
+    más reciente primero — para el selector de 'todas mis conversaciones'."""
+    threads = await _get_threads_doc(user_id)
+    summaries = [
+        {
+            "id": thread_id,
+            "title": data.get("title") or "Nueva conversación",
+            "created_at": data.get("created_at"),
+            "updated_at": data.get("updated_at"),
+            "message_count": len(data.get("messages", [])),
+        }
+        for thread_id, data in threads.items()
+    ]
+    summaries.sort(key=lambda s: s["updated_at"] or "", reverse=True)
+    return summaries
+
+
+async def get_thread_messages(user_id: int, thread_id: str) -> list[dict]:
+    """Mensajes de UNA conversación en particular (vacío si no existe — por
+    ejemplo, una conversación recién creada en el frontend que todavía no ha
+    recibido su primer turno)."""
+    threads = await _get_threads_doc(user_id)
+    return threads.get(thread_id, {}).get("messages", [])
+
+
+async def create_thread(user_id: int) -> dict:
+    """Crea una conversación nueva y vacía — 'Iniciar nueva conversación'."""
+    now = datetime.now(timezone.utc).isoformat()
+    thread_id = uuid.uuid4().hex
+    thread_data = {"title": "Nueva conversación", "messages": [], "created_at": now, "updated_at": now}
+    try:
+        client = _get_client()
+        doc_ref = client.collection(_COLLECTION).document(str(user_id))
+        snapshot = await doc_ref.get()
+        threads = snapshot.to_dict().get("threads", {}) if snapshot.exists else {}
+        threads[thread_id] = thread_data
+        await doc_ref.set({"threads": threads})
+    except Exception as exc:
+        logger.exception("No se pudo crear la conversación de chat en Firestore")
+        raise HTTPException(
+            status_code=503,
+            detail=f"No se pudo iniciar la conversación (Firestore no disponible). Detalle técnico: {exc}",
+        ) from exc
+    return {"id": thread_id, "message_count": 0, **{k: thread_data[k] for k in ("title", "created_at", "updated_at")}}
 
 
 async def append_turn(
     user_id: int,
+    thread_id: str,
     *,
     user_message: str,
     assistant_reply: str,
     base_history: list[dict] | None = None,
 ) -> list[dict]:
-    """Agrega el turno (mensaje del usuario + respuesta del asistente) al
-    historial persistido y devuelve el historial completo actualizado.
+    """Agrega el turno (mensaje del usuario + respuesta del asistente) a ESA
+    conversación (`thread_id`) y devuelve su historial completo actualizado.
+    Si la conversación no existía todavía (por ejemplo, el frontend mandó
+    `thread_id=None` y este es el primer mensaje), se crea aquí mismo, con un
+    título derivado de este primer mensaje.
 
     `base_history`, si se pasa (ver chat.py — es el historial ya fusionado
     con lo que mandó el frontend), se usa como base en vez de releer el
@@ -83,13 +149,23 @@ async def append_turn(
     try:
         client = _get_client()
         doc_ref = client.collection(_COLLECTION).document(str(user_id))
+        snapshot = await doc_ref.get()
+        threads = snapshot.to_dict().get("threads", {}) if snapshot.exists else {}
+        existing = threads.get(thread_id, {})
+
         if base_history is not None:
             history = list(base_history)
         else:
-            snapshot = await doc_ref.get()
-            history = snapshot.to_dict().get("messages", []) if snapshot.exists else []
+            history = list(existing.get("messages", []))
         history.extend(new_messages)
-        await doc_ref.set({"messages": history, "updated_at": now})
+
+        threads[thread_id] = {
+            "title": existing.get("title") or _make_title(user_message),
+            "messages": history,
+            "created_at": existing.get("created_at") or now,
+            "updated_at": now,
+        }
+        await doc_ref.set({"threads": threads})
         return history
     except Exception as exc:
         logger.exception("No se pudo guardar el turno de chat en Firestore")
@@ -102,12 +178,21 @@ async def append_turn(
         ) from exc
 
 
-async def reset_conversation(user_id: int) -> None:
+async def delete_thread(user_id: int, thread_id: str) -> None:
+    """Borra UNA conversación (no todas) — usado para "eliminar" una
+    conversación puntual de la lista, sin perder las demás."""
     try:
         client = _get_client()
-        await client.collection(_COLLECTION).document(str(user_id)).delete()
+        doc_ref = client.collection(_COLLECTION).document(str(user_id))
+        snapshot = await doc_ref.get()
+        if not snapshot.exists:
+            return
+        threads = snapshot.to_dict().get("threads", {})
+        if thread_id in threads:
+            threads.pop(thread_id)
+            await doc_ref.set({"threads": threads})
     except Exception:
-        logger.warning("No se pudo borrar el historial de chat en Firestore", exc_info=True)
+        logger.warning("No se pudo borrar la conversación de chat en Firestore", exc_info=True)
 
 
 # --- Historial de Vision (bonus 1) -----------------------------------------

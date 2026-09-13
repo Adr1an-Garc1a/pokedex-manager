@@ -110,7 +110,18 @@ export interface ChatMessage {
 export interface ChatResponse {
   reply: string;
   history: ChatMessage[];
+  thread_id: string;
   history_persisted: boolean;
+}
+
+/** Una conversación en la lista de "todas mis conversaciones" — sin sus
+ * mensajes completos (esos se piden aparte, al abrirla). */
+export interface ChatThreadSummary {
+  id: string;
+  title: string;
+  created_at: string | null;
+  updated_at: string | null;
+  message_count: number;
 }
 
 export interface AlternativeSuggestion {

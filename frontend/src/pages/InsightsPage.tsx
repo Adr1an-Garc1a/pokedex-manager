@@ -3,6 +3,7 @@ import { getErrorMessage } from "@/api/errors";
 import { PokeballRating } from "@/components/PokeballRating";
 import { PokeballSpinner } from "@/components/PokeballSpinner";
 import { TypeBadge } from "@/components/TypeBadge";
+import { useAuth } from "@/context/AuthContext";
 import type { AlternativeSuggestion, TeamRecommendation } from "@/types";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -33,9 +34,20 @@ function PokemonSprite({
 }
 
 export function InsightsPage() {
+  const { user } = useAuth();
+
+  // Bug real reportado: al cambiar de cuenta en la misma sesión del
+  // navegador (sin cerrar la pestaña), esta página mostraba el análisis de
+  // la cuenta ANTERIOR — porque React Query cachea por `queryKey`, y esta
+  // key no incluía ningún identificador del usuario, así que las dos cuentas
+  // compartían la misma entrada de caché. Con `user?.id` en la key, cada
+  // cuenta tiene su propia entrada — nunca puede "heredar" el análisis de
+  // otra. (Se complementa con `queryClient.clear()` al cerrar sesión en
+  // AuthContext.tsx, como defensa adicional para cualquier otra query.)
   const { data, isLoading, error } = useQuery({
-    queryKey: ["ai", "insights"],
+    queryKey: ["ai", "insights", user?.id],
     queryFn: getCollectionInsights,
+    enabled: !!user,
     retry: false,
   });
 

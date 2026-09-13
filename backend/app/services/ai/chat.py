@@ -17,11 +17,14 @@ Flujo por cada mensaje del usuario:
      directamente en Python) y su resultado se le devuelve a Claude como
      "tool_result", repitiendo hasta que responda con texto final.
   5. El turno completo (mensaje del usuario + respuesta final) se persiste
-     en Firestore.
+     en Firestore, en la conversación (`thread_id`) que se venga usando — el
+     usuario puede tener varias conversaciones guardadas a la vez ("Iniciar
+     nueva conversación") y retomar cualquiera de ellas más tarde.
 """
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from anthropic import AsyncAnthropic
@@ -32,7 +35,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.user import User
 from app.services.ai.mcp_tools import build_mcp_server
-from app.services.firestore_client import append_turn, get_conversation
+from app.services.firestore_client import append_turn, get_thread_messages
 
 settings = get_settings()
 logger = logging.getLogger("pokedex_manager.ai.chat")
@@ -113,8 +116,15 @@ async def run_pokedex_chat(
     user: User,
     user_message: str,
     client_history: list[dict] | None = None,
-) -> tuple[str, list[dict], bool]:
-    history = _merge_history(await get_conversation(user.id), client_history or [])
+    thread_id: str | None = None,
+) -> tuple[str, list[dict], bool, str]:
+    """`thread_id`: conversación a continuar. Si es None (usuario sin ninguna
+    conversación todavía, o el frontend pide explícitamente una nueva sin
+    pre-crearla), se genera un ID nuevo aquí mismo — la conversación se crea
+    "de facto" en Firestore la primera vez que `append_turn` la guarda (con un
+    título derivado de este mismo mensaje)."""
+    thread_id = thread_id or uuid.uuid4().hex
+    history = _merge_history(await get_thread_messages(user.id, thread_id), client_history or [])
     recent_history = history[-_MAX_HISTORY_MESSAGES:]
 
     server = build_mcp_server(db=db, user=user)
@@ -228,7 +238,11 @@ async def run_pokedex_chat(
         # anteriores, este guardado "autocura" el documento con la versión
         # más completa que se tenga, en vez de perpetuar el hueco.
         updated_history = await append_turn(
-            user.id, user_message=user_message, assistant_reply=final_text, base_history=history
+            user.id,
+            thread_id,
+            user_message=user_message,
+            assistant_reply=final_text,
+            base_history=history,
         )
         persisted = True
     except HTTPException as exc:
@@ -242,4 +256,4 @@ async def run_pokedex_chat(
         ]
         persisted = False
 
-    return final_text, updated_history, persisted
+    return final_text, updated_history, persisted, thread_id
