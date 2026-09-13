@@ -1,7 +1,7 @@
 """Rutas de las funcionalidades bonus de IA:
   1. POST /ai/vision/identify   — identificar un Pokémon por foto (Gemini)
   2. GET  /ai/vision/history    — historial de identificaciones pasadas (con imagen)
-  3. POST /ai/chat              — chat MCP sobre tu colección (Claude Sonnet 5)
+  3. POST /ai/chat              — chat MCP sobre tu colección (Claude)
   4. GET  /ai/chat/history      — recuperar el historial de chat
   5. DELETE /ai/chat/history    — reiniciar la conversación
   6. GET  /ai/insights          — análisis inteligente de tu colección (Gemini)
@@ -85,7 +85,10 @@ async def chat(
             ),
         )
     reply, history, persisted = await run_pokedex_chat(
-        db=db, user=current_user, user_message=payload.message
+        db=db,
+        user=current_user,
+        user_message=payload.message,
+        client_history=[m.model_dump() for m in payload.client_history],
     )
     return ChatResponse(reply=reply, history=history, history_persisted=persisted)
 

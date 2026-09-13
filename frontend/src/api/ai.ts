@@ -31,8 +31,20 @@ export async function getChatHistory(): Promise<ChatMessage[]> {
   return data;
 }
 
-export async function sendChatMessage(message: string): Promise<ChatResponse> {
-  const { data } = await apiClient.post<ChatResponse>("/ai/chat", { message });
+/**
+ * `clientHistory`: la copia local (localStorage) de la conversación — se
+ * manda siempre que se tenga, para que el backend pueda fusionarla con lo
+ * que Firestore tenga guardado y así el contexto de la conversación
+ * sobreviva aunque ese guardado esté fallando (ver chatHistoryCache.ts).
+ */
+export async function sendChatMessage(
+  message: string,
+  clientHistory: ChatMessage[] = []
+): Promise<ChatResponse> {
+  const { data } = await apiClient.post<ChatResponse>("/ai/chat", {
+    message,
+    client_history: clientHistory,
+  });
   return data;
 }
 

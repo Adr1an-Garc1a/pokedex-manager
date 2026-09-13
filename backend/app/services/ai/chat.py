@@ -1,6 +1,8 @@
-"""Bonus 2 — Orquesta el chat "¿Tienes dudas de tu Pokédex?": Claude Sonnet 5
-(Anthropic) respondiendo con acceso, vía MCP, a la colección real del
-usuario.
+"""Bonus 2 — Orquesta el chat "¿Tienes dudas de tu Pokédex?": un modelo de
+Claude (Anthropic, configurable vía ANTHROPIC_MODEL — por defecto
+claude-haiku-4-5, mucho más barato que Sonnet 5 y con soporte de tool use
+igual de bueno para esta app) respondiendo con acceso, vía MCP, a la
+colección real del usuario.
 
 Flujo por cada mensaje del usuario:
   1. Se levanta un servidor MCP en memoria (mcp_tools.build_mcp_server),
@@ -76,10 +78,43 @@ def _tool_result_to_text(result) -> str:
     return "\n".join(parts) if parts else "(sin contenido)"
 
 
+def _merge_history(*sources: list[dict]) -> list[dict]:
+    """Combina varias listas de mensajes (típicamente: lo que Firestore tiene
+    guardado + lo que el frontend mandó como su propia copia local) en una
+    sola, sin duplicados (por rol+contenido+timestamp) y en orden
+    cronológico.
+
+    Por qué existe: si el guardado en Firestore ha estado fallando (el 403
+    de permisos reportado), la memoria de la conversación que el backend le
+    da a Claude en cada mensaje nuevo sería SIEMPRE vacía, así que Claude
+    "olvidaría" todo entre un mensaje y el siguiente aunque el usuario esté
+    en la misma conversación — el chat "funciona" pero no mantiene contexto.
+    El frontend guarda su propia copia (ver utils/chatHistoryCache.ts) y la
+    manda en cada request (`client_history`); aquí se fusiona con lo que
+    Firestore sí tenga, así que el contexto real de la conversación sobrevive
+    aunque el guardado del lado del servidor esté fallando.
+    """
+    seen: set[tuple] = set()
+    merged: list[dict] = []
+    for source in sources:
+        for msg in source:
+            key = (msg.get("role"), msg.get("content"), msg.get("ts"))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(msg)
+    merged.sort(key=lambda m: m.get("ts") or "")
+    return merged
+
+
 async def run_pokedex_chat(
-    *, db: Session, user: User, user_message: str
+    *,
+    db: Session,
+    user: User,
+    user_message: str,
+    client_history: list[dict] | None = None,
 ) -> tuple[str, list[dict], bool]:
-    history = await get_conversation(user.id)
+    history = _merge_history(await get_conversation(user.id), client_history or [])
     recent_history = history[-_MAX_HISTORY_MESSAGES:]
 
     server = build_mcp_server(db=db, user=user)
@@ -168,7 +203,7 @@ async def run_pokedex_chat(
     except Exception as exc:
         root = _root_cause(exc)
         logger.exception(
-            "Fallo en el chat MCP con Claude Sonnet 5 (causa real desenvuelta: %r)", root
+            "Fallo en el chat MCP (causa real desenvuelta: %r)", root
         )
         raise HTTPException(
             status_code=503,
@@ -187,8 +222,13 @@ async def run_pokedex_chat(
     # queda guardada para la próxima vez. Antes, un fallo acá tumbaba TODA la
     # respuesta con un 503 aunque el chat sí hubiera funcionado.
     try:
+        # `base_history=history` (el ya fusionado con lo que mandó el
+        # frontend) en vez de dejar que append_turn relea Firestore por su
+        # cuenta: así, si Firestore se había quedado corto por fallos
+        # anteriores, este guardado "autocura" el documento con la versión
+        # más completa que se tenga, en vez de perpetuar el hueco.
         updated_history = await append_turn(
-            user.id, user_message=user_message, assistant_reply=final_text
+            user.id, user_message=user_message, assistant_reply=final_text, base_history=history
         )
         persisted = True
     except HTTPException as exc:

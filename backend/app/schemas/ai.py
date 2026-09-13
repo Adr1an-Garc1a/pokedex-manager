@@ -59,7 +59,7 @@ class PokemonVisionResult(BaseModel):
     )
 
 
-# --- 2. Chat MCP (Claude Sonnet 5) ----------------------------------------
+# --- 2. Chat MCP (Claude, modelo configurable vía ANTHROPIC_MODEL) --------
 
 
 class ChatMessage(BaseModel):
@@ -70,6 +70,14 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
+    client_history: list[ChatMessage] = Field(
+        default_factory=list,
+        description=(
+            "Copia local (frontend) del historial de esta conversación — se fusiona con lo que "
+            "Firestore tenga guardado, para que el contexto de la conversación sobreviva aunque "
+            "el guardado en Firestore esté fallando (ver docs/BONUS_FEATURES.md)"
+        ),
+    )
 
 
 class ChatResponse(BaseModel):

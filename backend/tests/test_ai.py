@@ -361,7 +361,7 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
     async def fake_get_conversation(user_id):
         return []
 
-    async def fake_append_turn(user_id, *, user_message, assistant_reply):
+    async def fake_append_turn(user_id, *, user_message, assistant_reply, base_history=None):
         history = [
             {"role": "user", "content": user_message, "ts": "now"},
             {"role": "assistant", "content": assistant_reply, "ts": "now"},
@@ -423,7 +423,7 @@ async def test_run_pokedex_chat_handles_thinking_blocks(monkeypatch):
     async def fake_get_conversation(user_id):
         return []
 
-    async def fake_append_turn(user_id, *, user_message, assistant_reply):
+    async def fake_append_turn(user_id, *, user_message, assistant_reply, base_history=None):
         return [
             {"role": "user", "content": user_message, "ts": "now"},
             {"role": "assistant", "content": assistant_reply, "ts": "now"},
@@ -466,7 +466,7 @@ async def test_run_pokedex_chat_survives_firestore_write_failure(monkeypatch):
     async def fake_get_conversation(user_id):
         return []
 
-    async def fake_append_turn_fails(user_id, *, user_message, assistant_reply):
+    async def fake_append_turn_fails(user_id, *, user_message, assistant_reply, base_history=None):
         raise HTTPException(status_code=503, detail="Firestore no disponible: 403 permisos")
 
     monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
@@ -480,6 +480,70 @@ async def test_run_pokedex_chat_survives_firestore_write_failure(monkeypatch):
     assert persisted is False
     assert history[-1]["content"] == reply
     assert history[-2]["content"] == "hola"
+
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_run_pokedex_chat_uses_client_history_when_firestore_has_none(monkeypatch):
+    """Si Firestore no tiene nada guardado (por ejemplo, porque el guardado
+    llevaba tiempo fallando por el 403 de permisos), pero el frontend manda
+    su propia copia local de la conversación (`client_history`), Claude debe
+    seguir recibiendo ese contexto — el chat no debe "olvidar" la
+    conversación solo porque Firestore está fallando. Además, el guardado
+    debe autocurarse: debe escribirse la versión completa (fusionada), no
+    solo el turno nuevo."""
+    from app.db.session import SessionLocal
+    from app.models.user import User
+
+    db = SessionLocal()
+    user = User(google_sub="sub-chat-contexto", email="contexto@example.com", name="Contexto")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _FakeAsyncAnthropic._shared_responses = [
+        _FakeMessage(content=[_FakeTextBlock("Sí, ya me habías dicho eso.")]),
+    ]
+    monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
+    monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
+
+    async def fake_get_conversation(user_id):
+        return []  # Firestore "vacío" — simula que el guardado ha estado fallando
+
+    append_calls: list[dict] = []
+
+    async def fake_append_turn(user_id, *, user_message, assistant_reply, base_history=None):
+        append_calls.append({"base_history": base_history})
+        merged = list(base_history or []) + [
+            {"role": "user", "content": user_message, "ts": "now"},
+            {"role": "assistant", "content": assistant_reply, "ts": "now"},
+        ]
+        return merged
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
+
+    client_history = [
+        {"role": "user", "content": "Mi Pokémon favorito es Pikachu", "ts": "2026-01-01T00:00:00"},
+        {"role": "assistant", "content": "¡Genial, Pikachu es un gran Pokémon!", "ts": "2026-01-01T00:00:01"},
+    ]
+
+    reply, history, persisted = await chat_module.run_pokedex_chat(
+        db=db, user=user, user_message="¿cuál dije que era mi favorito?", client_history=client_history
+    )
+
+    assert reply == "Sí, ya me habías dicho eso."
+    assert persisted is True
+
+    # Claude sí recibió el contexto anterior (mandado solo por el frontend).
+    sent_messages = _FakeAsyncAnthropic.last_instance.messages.create_calls[0]["messages"]
+    assert any("Pikachu" in str(m["content"]) for m in sent_messages)
+
+    # Y el guardado se autocura: escribe la versión completa (2 mensajes
+    # previos del cliente + el turno nuevo), no solo el turno nuevo solo.
+    assert len(append_calls[0]["base_history"]) == 2
+    assert len(history) == 4
 
     db.close()
 

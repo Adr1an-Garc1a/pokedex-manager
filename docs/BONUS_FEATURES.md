@@ -11,7 +11,7 @@ resto de la app sigue funcionando normal).
 | # | Feature | Modelo | Dónde vive |
 |---|---|---|---|
 | 1 | Identificar Pokémon por foto (Vision) | **Gemini 2.5 Flash** (Vertex AI / Model Garden) | `POST /api/v1/ai/vision/identify` |
-| 2 | Chat sobre tu colección (MCP) | **Claude Sonnet 5** (API de Anthropic) | `POST /api/v1/ai/chat` |
+| 2 | Chat sobre tu colección (MCP) | **Claude** (API de Anthropic) — `claude-haiku-4-5` por defecto, configurable a `claude-sonnet-5` | `POST /api/v1/ai/chat` |
 | 3 | Insights de colección | **Gemini 2.5 Flash** (Vertex AI) | `GET /api/v1/ai/insights` |
 
 ## 1. Vision — identificar un Pokémon por foto
@@ -79,7 +79,7 @@ donde es fácil encontrarlo, fuerte/débil contra en español) y el botón de
 agregar a la colección; debajo, el historial completo (`VisionIdentifyPage.tsx`)
 se muestra como una tabla con esas mismas columnas.
 
-## 2. Chat MCP — Claude Sonnet 5 sobre tu colección
+## 2. Chat MCP — Claude sobre tu colección
 
 `POST /api/v1/ai/chat` (body `{"message": "..."}`, requiere sesión) · `GET` /
 `DELETE /api/v1/ai/chat/history`.
@@ -113,31 +113,42 @@ sin necesidad real para esta app. En su lugar, **por cada mensaje de chat**:
    transporte de red que tendría un servidor MCP standalone (stdio o HTTP).
 3. Se listan las tools del servidor y se traducen al formato de `tools` de la
    API de Claude.
-4. Se llama a Claude con el historial (cargado de Firestore) + el mensaje
-   nuevo. Si responde con `tool_use`, la tool se ejecuta a través del
-   `ClientSession` MCP (no se llama directo a una función de Python) y su
-   resultado se le devuelve a Claude como `tool_result`; esto se repite hasta
-   que responde con texto final (tope de 5 iteraciones).
-5. El turno completo se guarda en Firestore — **best effort**: si Firestore
-   falla (por ejemplo, un problema de permisos), Claude ya respondió
-   correctamente y esa respuesta se le entrega igual al usuario
-   (`history_persisted: false` en la respuesta), solo no queda guardada para
-   la próxima vez que abra el chat.
+4. Se llama a Claude con el historial + el mensaje nuevo. Ese historial NO
+   sale solo de Firestore: se fusiona (`chat.py`, `_merge_history`) con
+   `client_history`, la copia local que manda el frontend en cada request
+   (`utils/chatHistoryCache.ts`, guardada en `localStorage` por cuenta de
+   usuario) — así, si el guardado en Firestore ha estado fallando, Claude
+   sigue teniendo el contexto real de la conversación en vez de "olvidarlo"
+   en cada mensaje nuevo. Si Claude responde con `tool_use`, la tool se
+   ejecuta a través del `ClientSession` MCP (no se llama directo a una
+   función de Python) y su resultado se le devuelve a Claude como
+   `tool_result`; esto se repite hasta que responde con texto final (tope de
+   5 iteraciones).
+5. El turno completo se guarda en Firestore, usando como base la versión ya
+   fusionada del punto anterior (no lo que Firestore tenía guardado antes) —
+   así el documento se "autocura" con la versión más completa disponible en
+   vez de perpetuar un hueco de mensajes perdidos. Es **best effort**: si
+   Firestore falla (por ejemplo, un problema de permisos), Claude ya
+   respondió correctamente y esa respuesta se le entrega igual al usuario
+   (`history_persisted: false` en la respuesta), solo no queda guardada del
+   lado del servidor — el frontend sigue viéndola igual, porque ya la tiene
+   en su copia local.
 
 ```mermaid
 sequenceDiagram
     participant U as Usuario
-    participant FE as Frontend
+    participant FE as Frontend (+ caché local)
     participant BE as Backend (FastAPI)
     participant MCP as Servidor MCP (en memoria)
-    participant C as Claude Sonnet 5
+    participant C as Claude (Anthropic)
     participant FS as Firestore
 
     U->>FE: Escribe una pregunta
-    FE->>BE: POST /ai/chat {message}
+    FE->>BE: POST /ai/chat {message, client_history}
     BE->>FS: Cargar historial
+    Note over BE: se fusiona con client_history
     BE->>MCP: Levantar servidor + ClientSession
-    BE->>C: messages.create(tools=[...], historial + mensaje)
+    BE->>C: messages.create(tools=[...], historial fusionado + mensaje)
     alt Claude pide una tool
         C-->>BE: tool_use (ej. get_collection_stats)
         BE->>MCP: session.call_tool(...)
@@ -147,8 +158,9 @@ sequenceDiagram
     else responde directo
         C-->>BE: respuesta final en texto
     end
-    BE->>FS: Guardar turno (usuario + asistente)
+    BE->>FS: Guardar turno (sobre el historial ya fusionado)
     BE-->>FE: {reply, history, history_persisted}
+    FE->>FE: guarda `history` en localStorage
 ```
 
 ### Solución de problemas — "el chat no funciona"
@@ -324,12 +336,48 @@ igual; solo `/ai/chat` responde `503` hasta que exista el secreto.
 
 ## Modelos usados (y cómo verificarlos si cambian)
 
-- Vision e Insights: `gemini-2.5-flash` (configurable vía `GEMINI_MODEL`).
-- Chat: `claude-sonnet-5` (configurable vía `ANTHROPIC_MODEL`) — es el modelo
-  vigente al momento de esta entrega; si Anthropic publica una versión más
-  nueva y quieres usarla, solo cambia esta variable de entorno (no hace falta
-  tocar código). La lista de modelos vigentes siempre está en
-  [platform.claude.com/docs/en/about-claude/models/model-ids-and-versions](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions).
+- Vision e Insights: `gemini-2.5-flash` (configurable vía `GEMINI_MODEL`) —
+  facturado por Vertex AI/GCP, no por una API key de Gemini (ver el punto
+  "¿Dónde se factura Gemini?" más abajo).
+- Chat: `claude-haiku-4-5-20251001` por defecto (configurable vía
+  `ANTHROPIC_MODEL`). Se eligió Haiku 4.5 en vez de Sonnet 5 a propósito por
+  costo: al momento de esta entrega, Haiku 4.5 cuesta **$1 / $5 por millón
+  de tokens de entrada/salida**, contra **$2 / $10** de Sonnet 5 — 5 veces
+  más barato en entrada, 2 veces en salida — y soporta tool use (MCP) igual
+  de bien para una colección personal de este tamaño; su contexto (200K
+  tokens) sobra para esta app. Si el enunciado de tu entrega exige
+  específicamente "Claude Sonnet 5" y quieres someterlo con ese modelo,
+  cambia esta única variable de entorno a `claude-sonnet-5` (no hace falta
+  tocar código, ni en local ni en Cloud Run/Secret Manager) — puedes usar
+  Haiku 4.5 para desarrollar y probar sin gastar tanta cuota, y volver a
+  Sonnet 5 solo para la entrega final si hace falta. La lista de modelos
+  vigentes y sus precios siempre está en
+  [platform.claude.com/docs/en/about-claude/models/model-ids-and-versions](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions)
+  y en [claude.com/pricing](https://claude.com/pricing).
+
+### ¿Dónde se factura Gemini 2.5 Flash si no hay una API key de Gemini?
+
+Vision e Insights usan **Vertex AI** (Model Garden), no la API pública de
+Gemini (la de [aistudio.google.com](https://aistudio.google.com), que sí usa
+una API key tipo `AIzaSy...`) — por diseño, para mantener todo dentro de la
+misma cuenta/facturación de GCP que ya usa el resto del proyecto (ver "Por
+qué Vertex AI / Model Garden" en la sección 1). Por eso no vas a encontrar
+una API key de Gemini en ningún lado del código ni de la consola: la
+autenticación es la **cuenta de servicio de Cloud Run** (ADC — Application
+Default Credentials), la misma que usa el backend para todo lo demás
+(Cloud SQL, Cloud Storage), con el rol `roles/aiplatform.user` que ya le
+diste en `02-service-accounts-iam.sh`.
+
+Para ver el consumo y el costo real, en la consola de GCP (no en
+"API keys"):
+- **Uso/cuota**: APIs & Services → Panel → busca "Vertex AI API" → pestaña
+  "Métricas", o directamente Vertex AI → "Model Garden" → Gemini 2.5 Flash.
+- **Costo**: Billing → Reports, filtra por servicio "Vertex AI API" (el SKU
+  suele decir algo como "Generative AI... Gemini 2.5 Flash").
+- Si esas pantallas salen vacías, lo más probable es que el backend nunca
+  haya llamado a Gemini con éxito todavía (revisa que `aiplatform.googleapis.com`
+  esté habilitado y que hayas usado Vision o Insights al menos una vez) — no
+  significa que esté mal configurado.
 
 ## Probar estos endpoints con Postman
 

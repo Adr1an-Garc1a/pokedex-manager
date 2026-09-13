@@ -57,9 +57,23 @@ async def get_conversation(user_id: int) -> list[dict]:
     return doc.to_dict().get("messages", [])
 
 
-async def append_turn(user_id: int, *, user_message: str, assistant_reply: str) -> list[dict]:
+async def append_turn(
+    user_id: int,
+    *,
+    user_message: str,
+    assistant_reply: str,
+    base_history: list[dict] | None = None,
+) -> list[dict]:
     """Agrega el turno (mensaje del usuario + respuesta del asistente) al
-    historial persistido y devuelve el historial completo actualizado."""
+    historial persistido y devuelve el historial completo actualizado.
+
+    `base_history`, si se pasa (ver chat.py — es el historial ya fusionado
+    con lo que mandó el frontend), se usa como base en vez de releer el
+    documento de Firestore: así, si el documento se había quedado corto por
+    fallos de guardado anteriores, este guardado "autocura" con la versión
+    más completa que se tenga, en vez de perpetuar el hueco. Si no se pasa
+    (compatibilidad con otros llamadores), se relee Firestore como antes.
+    """
     now = datetime.now(timezone.utc).isoformat()
     new_messages = [
         {"role": "user", "content": user_message, "ts": now},
@@ -69,8 +83,11 @@ async def append_turn(user_id: int, *, user_message: str, assistant_reply: str) 
     try:
         client = _get_client()
         doc_ref = client.collection(_COLLECTION).document(str(user_id))
-        snapshot = await doc_ref.get()
-        history = snapshot.to_dict().get("messages", []) if snapshot.exists else []
+        if base_history is not None:
+            history = list(base_history)
+        else:
+            snapshot = await doc_ref.get()
+            history = snapshot.to_dict().get("messages", []) if snapshot.exists else []
         history.extend(new_messages)
         await doc_ref.set({"messages": history, "updated_at": now})
         return history
