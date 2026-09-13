@@ -137,8 +137,8 @@ export function VisionIdentifyPage() {
           ¿No sabes qué Pokémon tienes? 📸
         </h1>
         <p className="text-poke-ink-soft">
-          Sube una foto (una carta, un peluche, una captura de pantalla...) y
-          averigüémoslo con IA — Gemini 2.5 Flash identifica el Pokémon por ti.
+          Sube una foto (una carta, un peluche, una captura de pantalla...) y averigüemos
+          quién es — además obtendrás datos importantes del Pokémon que subas.
         </p>
       </div>
 

@@ -229,7 +229,7 @@ export function PokedexChatPage() {
         <div>
           <h1 className="font-display text-2xl font-extrabold">¿Dudas de tu Pokédex? 💬</h1>
           <p className="text-sm text-poke-ink-soft">
-            La IA sabe leer tu colección en tiempo real (vía MCP).
+            Pregúntale lo que quieras sobre tu colección — la IA la lee en tiempo real.
           </p>
         </div>
 
@@ -319,11 +319,18 @@ export function PokedexChatPage() {
           {historyLoading && messages.length === 0 ? (
             <PokeballSpinner label="Cargando conversación..." />
           ) : messages.length === 0 ? (
-            <p className="m-auto text-center text-poke-ink-soft">
-              {activeThreadId
-                ? "Todavía no has chateado en esta conversación. Prueba con \"¿qué Pokémon tengo?\"."
-                : "Escribe tu primer mensaje para empezar una conversación nueva."}
-            </p>
+            <div className="m-auto flex max-w-md flex-col items-center gap-3 text-center text-poke-ink-soft">
+              <p>
+                Este es un chat abierto para preguntarle a la IA cualquier cosa que quieras
+                sobre Pokémon — sabe leer tu colección real en tiempo real. Puedes hacer
+                consultas como por ejemplo:
+              </p>
+              <ul className="flex flex-col gap-1 text-sm italic">
+                <li>"De mi colección, ¿qué Pokémon es el que tiene más nivel?"</li>
+                <li>"De todos los Pokémon que tengo, ¿cómo armarías un equipo de combate?"</li>
+                <li>"¿Quién es el Pokémon más débil de mi colección?"</li>
+              </ul>
+            </div>
           ) : (
             messages.map((m, i) => (
               <div

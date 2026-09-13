@@ -58,12 +58,16 @@ export function InsightsPage() {
           Insights de tu colección 🧠
         </h1>
         <p className="text-poke-ink-soft">
-          Análisis generado con IA (Gemini 2.5 Flash) basado en los primeros 6 Pokémon
-          que agregaste a tu colección.
+          ¡Este apartado te da insights importantes a considerar con tu equipo actual!
+          Te dice fortalezas, debilidades y recomendaciones para que seas aún más
+          poderoso — basado en los primeros 6 Pokémon que agregaste a tu colección
+          (análisis generado con IA, Gemini 2.5 Flash).
         </p>
       </div>
 
-      {isLoading && <PokeballSpinner label="Analizando tu colección con IA (puede tardar unos segundos)..." />}
+      {isLoading && (
+        <PokeballSpinner label="Espera un momento, entrenador/a... entendiendo tu equipo de Pokémon, ¡ya casi los cazas a todos! 🎯" />
+      )}
 
       {error && (
         <div className="poke-card mx-auto max-w-md p-6 text-center">

@@ -58,7 +58,8 @@ export function PokedexPage() {
         <div>
           <h1 className="font-display text-3xl font-extrabold">Pokédex</h1>
           <p className="text-poke-ink-soft">
-            Explora el catálogo (vía PokéAPI) y agrega Pokémon a tu colección.
+            ¡Bienvenido! Estos son todos los Pokémon registrados en nuestra Pokédex — si
+            tienes alguno de ellos, dale al botón de agregar para sumarlo a tu colección.
           </p>
         </div>
         <form onSubmit={handleSearchSubmit} className="flex gap-2">

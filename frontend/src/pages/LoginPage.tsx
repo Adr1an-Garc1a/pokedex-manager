@@ -71,93 +71,103 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-[80vh] flex-col items-center justify-center gap-8 px-4 py-10 text-center">
-      <div className="flex flex-col items-center gap-3">
-        <img src="/pokeball.svg" alt="PokéDex Manager" className="h-20 w-20 drop-shadow-lg" />
-        <h1 className="font-display text-4xl font-extrabold text-poke-ink">
-          PokéDex <span className="text-poke-teal-dark">Manager</span>
-        </h1>
-        <p className="max-w-md font-body text-poke-ink-soft">
-          Explora la Pokédex y arma tu colección personal. Inicia sesión con tu
-          cuenta de Google para empezar tu aventura.
-        </p>
+    <div className="mx-auto flex min-h-[85vh] max-w-5xl flex-col items-center justify-center gap-8 px-4 py-10 md:flex-row md:gap-12 lg:gap-16">
+      {/* Logo/portada — el mismo en todas las pantallas, con una imagen más
+          liviana (WebP) para conexiones móviles y un respaldo en PNG para
+          navegadores que no lo soporten. */}
+      <div className="poke-card w-full max-w-md shrink-0 p-3 sm:p-4 md:max-w-lg">
+        <picture>
+          <source srcSet="/pokedex-manager-logo.webp" type="image/webp" />
+          <img
+            src="/pokedex-manager-logo.png"
+            alt="PokéDex Manager — Organiza. Analiza. Descubre."
+            className="h-auto w-full rounded-xl2"
+          />
+        </picture>
       </div>
 
-      {pendingProfile ? (
-        <form onSubmit={handleRegisterSubmit} className="poke-card flex w-full max-w-sm flex-col gap-4 p-6">
-          <div className="flex flex-col items-center gap-2">
-            {pendingProfile.picture && (
-              <img
-                src={pendingProfile.picture}
-                alt={pendingProfile.name}
-                className="h-16 w-16 rounded-full border-2 border-poke-teal"
-              />
-            )}
-            <p className="font-display text-lg font-bold text-poke-ink">
-              ¡Bienvenido, {pendingProfile.name}!
-            </p>
-            <p className="text-sm text-poke-ink-soft">
-              Aún no tienes cuenta en PokéDex Manager. Confirma tus datos para
-              registrarte — se autocompletan con tu cuenta de Google.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-1 text-left">
-            <label htmlFor="email" className="text-xs font-semibold text-poke-ink-soft">
-              Correo (de tu cuenta de Google)
-            </label>
-            <input
-              id="email"
-              value={pendingProfile.email}
-              disabled
-              className="poke-input opacity-70"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1 text-left">
-            <label htmlFor="displayName" className="text-xs font-semibold text-poke-ink-soft">
-              Nombre para mostrar
-            </label>
-            <input
-              id="displayName"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              required
-              minLength={1}
-              className="poke-input"
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={cancelRegistration}
-              className="poke-btn-secondary flex-1"
-              disabled={isSubmitting}
-            >
-              Cancelar
-            </button>
-            <button type="submit" className="poke-btn-primary flex-1" disabled={isSubmitting}>
-              {isSubmitting ? "Registrando..." : "Completar registro"}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <div className="poke-card p-6">
-          <GoogleLogin
-            onSuccess={(credentialResponse) => handleGoogleSuccess(credentialResponse.credential)}
-            onError={() => setError("Falló el inicio de sesión con Google.")}
-          />
+      <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center md:items-start md:text-left">
+        <div className="flex flex-col items-center gap-2 md:items-start">
+          <h1 className="font-display text-3xl font-extrabold text-poke-ink sm:text-4xl">
+            ¡Bienvenido, entrenador/a! 👋
+          </h1>
+          <p className="max-w-md font-body text-poke-ink-soft">
+            Explora la Pokédex completa, arma tu colección personal e identifica
+            Pokémon por foto con ayuda de IA. Inicia sesión con tu cuenta de
+            Google para empezar tu aventura.
+          </p>
         </div>
-      )}
 
-      {error && <p className="text-sm text-poke-coral">{error}</p>}
+        {pendingProfile ? (
+          <form onSubmit={handleRegisterSubmit} className="poke-card flex w-full flex-col gap-4 p-6 text-left">
+            <div className="flex flex-col items-center gap-2 text-center">
+              {pendingProfile.picture && (
+                <img
+                  src={pendingProfile.picture}
+                  alt={pendingProfile.name}
+                  className="h-16 w-16 rounded-full border-2 border-poke-teal"
+                />
+              )}
+              <p className="font-display text-lg font-bold text-poke-ink">
+                ¡Bienvenido, {pendingProfile.name}!
+              </p>
+              <p className="text-sm text-poke-ink-soft">
+                Aún no tienes cuenta en PokéDex Manager. Confirma tus datos para
+                registrarte — se autocompletan con tu cuenta de Google.
+              </p>
+            </div>
 
-      <p className="text-xs text-poke-ink-soft">
-        ¿No ves el botón de Google? Configura{" "}
-        <code className="rounded bg-poke-mist px-1">VITE_GOOGLE_CLIENT_ID</code> en tu
-        archivo <code className="rounded bg-poke-mist px-1">.env</code>.
-      </p>
+            <div className="flex flex-col gap-1 text-left">
+              <label htmlFor="email" className="text-xs font-semibold text-poke-ink-soft">
+                Correo (de tu cuenta de Google)
+              </label>
+              <input
+                id="email"
+                value={pendingProfile.email}
+                disabled
+                className="poke-input opacity-70"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1 text-left">
+              <label htmlFor="displayName" className="text-xs font-semibold text-poke-ink-soft">
+                Nombre para mostrar
+              </label>
+              <input
+                id="displayName"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                required
+                minLength={1}
+                className="poke-input"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={cancelRegistration}
+                className="poke-btn-secondary flex-1"
+                disabled={isSubmitting}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="poke-btn-primary flex-1" disabled={isSubmitting}>
+                {isSubmitting ? "Registrando..." : "Completar registro"}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="poke-card flex w-full justify-center p-6">
+            <GoogleLogin
+              onSuccess={(credentialResponse) => handleGoogleSuccess(credentialResponse.credential)}
+              onError={() => setError("Falló el inicio de sesión con Google.")}
+            />
+          </div>
+        )}
+
+        {error && <p className="text-sm text-poke-coral">{error}</p>}
+      </div>
     </div>
   );
 }

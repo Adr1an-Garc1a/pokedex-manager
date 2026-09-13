@@ -85,7 +85,10 @@ export function CollectionPage() {
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl font-extrabold">Mi Colección</h1>
-          <p className="text-poke-ink-soft">Los Pokémon que has agregado a tu PokéDex.</p>
+          <p className="text-poke-ink-soft">
+            ¡Estos son los Pokémon que tienes y sus tipos! Siéntete libre de añadir el
+            nivel, un apodo o marcar tus favoritos para tener todo en cuenta.
+          </p>
         </div>
 
         {stats && (

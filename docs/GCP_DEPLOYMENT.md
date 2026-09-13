@@ -65,6 +65,8 @@ Cada script es idempotente: se puede volver a correr sin duplicar recursos.
 | `07-build-push.sh` | Build con Cloud Build (sin necesidad de Docker local) y push a Artifact Registry |
 | `08-deploy-backend.sh` | Cloud Run del backend, conectado a Cloud SQL por Unix socket, secretos inyectados |
 | `09-deploy-frontend.sh` | Cloud Run del frontend (nginx sirviendo el build de Vite) |
+| `11-setup-firestore.sh` | Base de datos de Firestore (historial de chat IA y de Vision) — ver `docs/BONUS_FEATURES.md` |
+| `12-reset-data.sh` | Borra TODOS los datos (usuarios, colección, chat, Vision) sin borrar la infraestructura — para "empezar limpio" (pide confirmación explícita) |
 | `99-teardown.sh` | Borra todo lo anterior (pide confirmación explícita) |
 
 ## 4. Verificar el despliegue
@@ -87,6 +89,29 @@ demo/evaluación. Aun así, para no dejar nada facturando:
 cd infra/gcp
 ./99-teardown.sh
 ```
+
+## 5b. Reiniciar los datos sin borrar la infraestructura
+
+Para "empezar limpio" antes de una demo o entrega — sin usuarios, colección,
+historial de chat ni de Vision — pero SIN tener que volver a desplegar nada
+(la infraestructura se queda tal cual):
+
+```bash
+cd infra/gcp
+export PROJECT_ID=tu-proyecto-gcp
+./12-reset-data.sh
+```
+
+Pide confirmación explícita antes de borrar nada. Vacía las tablas de Cloud
+SQL (conserva el esquema), borra las imágenes del bucket de Cloud Storage, y
+borra los documentos de Firestore (`mcp_conversations`, `vision_history`).
+Requiere `psql` instalado localmente (para el paso de Cloud SQL — ya viene en
+Cloud Shell) y credenciales de aplicación por defecto (`gcloud auth
+application-default login`) para el paso de Firestore.
+
+Esto es distinto de `99-teardown.sh`: ese SÍ elimina la infraestructura en
+sí (instancias, servicios, el bucket); `12-reset-data.sh` solo vacía los
+datos, la app queda lista para usarse de inmediato.
 
 ## 6. De `.sh` a Terraform (siguiente paso natural)
 
