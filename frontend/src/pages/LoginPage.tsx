@@ -71,33 +71,20 @@ export function LoginPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-[85vh] max-w-5xl flex-col items-center justify-center gap-8 px-4 py-10 md:flex-row md:gap-12 lg:gap-16">
-      {/* Logo/portada — el mismo en todas las pantallas, con una imagen más
-          liviana (WebP) para conexiones móviles y un respaldo en PNG para
-          navegadores que no lo soporten. */}
-      <div className="poke-card w-full max-w-md shrink-0 p-3 sm:p-4 md:max-w-lg">
-        <picture>
-          <source srcSet="/pokedex-manager-logo.webp" type="image/webp" />
-          <img
-            src="/pokedex-manager-logo.png"
-            alt="PokéDex Manager — Organiza. Analiza. Descubre."
-            className="h-auto w-full rounded-xl2"
-          />
-        </picture>
+    <div className="mx-auto flex min-h-[85vh] max-w-md flex-col items-center justify-center gap-8 px-4 py-10 text-center">
+      <div className="flex flex-col items-center gap-3">
+        <img src="/pokeball.svg" alt="" className="h-16 w-16" aria-hidden />
+        <h1 className="font-display text-3xl font-extrabold text-poke-ink sm:text-4xl">
+          ¡Bienvenido, entrenador/a! 👋
+        </h1>
+        <p className="max-w-md font-body text-poke-ink-soft">
+          Explora la Pokédex completa, arma tu colección personal e identifica
+          Pokémon por foto con ayuda de IA. Inicia sesión con tu cuenta de
+          Google para empezar tu aventura.
+        </p>
       </div>
 
-      <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center md:items-start md:text-left">
-        <div className="flex flex-col items-center gap-2 md:items-start">
-          <h1 className="font-display text-3xl font-extrabold text-poke-ink sm:text-4xl">
-            ¡Bienvenido, entrenador/a! 👋
-          </h1>
-          <p className="max-w-md font-body text-poke-ink-soft">
-            Explora la Pokédex completa, arma tu colección personal e identifica
-            Pokémon por foto con ayuda de IA. Inicia sesión con tu cuenta de
-            Google para empezar tu aventura.
-          </p>
-        </div>
-
+      <div className="flex w-full flex-col items-center gap-6">
         {pendingProfile ? (
           <form onSubmit={handleRegisterSubmit} className="poke-card flex w-full flex-col gap-4 p-6 text-left">
             <div className="flex flex-col items-center gap-2 text-center">

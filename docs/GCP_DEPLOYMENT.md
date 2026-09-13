@@ -1,39 +1,62 @@
 # Despliegue en Google Cloud Platform
 
-> **Recordatorio del enunciado:** *"No es necesario que la aplicación esté
-> desplegada en producción."* Esta guía existe porque se pidió explícitamente
-> como parte del ejercicio (arquitectura + scripts `.sh`), no porque sea un
-> requisito de la prueba. Para evaluar el proyecto, `docker compose up` (ver
-> README.md) es suficiente y más rápido.
+> **Nota:** el enunciado de la prueba no exige que la aplicación esté
+> desplegada en producción — `docker compose up` (ver el
+> [README](../README.md)) es suficiente para evaluar el proyecto. Esta guía
+> documenta el despliegue en GCP porque se pidió explícitamente como parte
+> del ejercicio (arquitectura + scripts `.sh`), y porque la instancia pública
+> del proyecto (enlazada en el README) corre sobre esta misma infraestructura.
 
-## 0. Prerrequisitos
+## Prerrequisitos
 
-- Tener un proyecto de GCP con facturación habilitada.
-- `gcloud` CLI instalado y autenticado: `gcloud auth login`.
-- `gcloud config set project <TU_PROJECT_ID>` (o exporta `PROJECT_ID` antes de cada script).
+- Un proyecto de GCP con facturación habilitada.
+- `gcloud` CLI instalado y autenticado (`gcloud auth login`).
+- `gcloud config set project <TU_PROJECT_ID>` (o exportar `PROJECT_ID` antes
+  de cada script).
 
-## 1. Configurar Google OAuth consent screen (manual, una sola vez)
+## OAuth consent screen (manual, una sola vez)
 
-Esto no se automatiza por script porque la consola de OAuth no expone una API
-CLI completa para el consent screen:
+La consola de OAuth no expone una API CLI completa para el consent screen,
+así que este paso no se automatiza:
 
-1. Ve a [Google Cloud Console → APIs & Services → OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent).
-2. Tipo de usuario: **External** (o Internal si usas Google Workspace).
-3. Completa nombre de la app ("PokéDex Manager"), correo de soporte, dominio (opcional en dev).
-4. Scopes: deja los básicos (`email`, `profile`, `openid`).
-5. Ve a **Credentials → Create Credentials → OAuth Client ID**, tipo **Web application**.
-6. En **Authorized JavaScript origins** agrega, por ahora, `http://localhost:5173`
-   (más adelante agregarás la URL de Cloud Run del frontend).
-7. Copia el **Client ID** generado — lo usarás como `GOOGLE_CLIENT_ID`.
+1. [Google Cloud Console → APIs & Services → OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent).
+2. Tipo de usuario: **External** (o Internal con Google Workspace).
+3. Nombre de la app, correo de soporte, dominio (opcional en dev).
+4. Scopes básicos (`email`, `profile`, `openid`).
+5. **Credentials → Create Credentials → OAuth Client ID**, tipo **Web application**.
+6. En **Authorized JavaScript origins** agregar `http://localhost:5173` y, más
+   adelante, la URL de Cloud Run del frontend.
+7. Copiar el **Client ID** — es `GOOGLE_CLIENT_ID`.
 
-## 2. Orden de ejecución de los scripts (`infra/gcp/`)
+## Scripts de aprovisionamiento (`infra/gcp/`)
+
+Cada script es idempotente (se puede volver a correr sin duplicar recursos)
+y numerado en el orden en que se ejecutan la primera vez:
+
+| Script | Recurso |
+|---|---|
+| `00-config.sh` | Variables compartidas (no crea nada, se importa con `source`) |
+| `01-enable-apis.sh` | Habilita Cloud Run, Cloud SQL, Storage, Artifact Registry, Secret Manager, Cloud Build, Vertex AI |
+| `02-service-accounts-iam.sh` | Service account de runtime + roles mínimos (`cloudsql.client`, `storage.objectAdmin`, `secretmanager.secretAccessor`, `aiplatform.user`, `datastore.user`) |
+| `03-cloud-sql.sh` | Instancia Postgres 16, base de datos, usuario, y guarda `DATABASE_URL` en Secret Manager |
+| `04-storage-bucket.sh` | Bucket GCS para imágenes + CORS |
+| `05-artifact-registry.sh` | Repositorio Docker |
+| `06-secrets.sh` | `JWT_SECRET_KEY` (autogenerado), `GOOGLE_CLIENT_ID` y, si se exporta `ANTHROPIC_API_KEY`, el secreto del chat IA |
+| `07-build-push.sh` | Build con Cloud Build (sin Docker local) y push a Artifact Registry |
+| `08-deploy-backend.sh` | Cloud Run del backend, conectado a Cloud SQL por Unix socket, secretos inyectados |
+| `09-deploy-frontend.sh` | Cloud Run del frontend (nginx sirviendo el build de Vite) |
+| `10-setup-ci-cd-iam.sh` | Permisos de la service account de Cloud Build para el pipeline de CI/CD — ver [`CI_CD.md`](CI_CD.md) |
+| `11-setup-firestore.sh` | Base de datos de Firestore (historial de chat IA y de Vision) — ver [`BONUS_FEATURES.md`](BONUS_FEATURES.md) |
+| `12-reset-data.sh` | Vacía todos los datos (usuarios, colección, chat, Vision) sin borrar infraestructura, para "reiniciar" la app |
+| `99-teardown.sh` | Borra toda la infraestructura anterior (pide confirmación explícita) |
+| `ci-deploy-backend.sh`, `ci-deploy-frontend.sh`, `lib-service-urls.sh` | Usados solo por el pipeline de Cloud Build (ver [`CI_CD.md`](CI_CD.md)) — no se corren a mano |
+
+### Orden de ejecución (primera vez)
 
 ```bash
 cd infra/gcp
-chmod +x *.sh   # ya vienen con permisos de ejecución en el repo, por si acaso
-
 export PROJECT_ID=tu-proyecto-gcp
-export GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com   # el del paso 1
+export GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com   # del paso de OAuth
 
 ./01-enable-apis.sh
 ./02-service-accounts-iam.sh
@@ -41,60 +64,50 @@ export GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com   # el del paso 1
 ./04-storage-bucket.sh
 ./05-artifact-registry.sh
 ./06-secrets.sh
+./11-setup-firestore.sh      # necesario para el chat IA y el historial de Vision
 ./07-build-push.sh           # construye backend y frontend con Cloud Build
 ./08-deploy-backend.sh       # despliega backend, imprime su URL
-# Reconstruye el frontend ya con la URL real del backend:
+
 export BACKEND_URL=$(cat .last-backend-url)
-./07-build-push.sh
+./07-build-push.sh           # reconstruye el frontend ya con la URL real del backend
 ./09-deploy-frontend.sh
 ```
 
-Cada script es idempotente: se puede volver a correr sin duplicar recursos.
-
-## 3. Qué crea cada script
-
-| Script | Recurso |
-|---|---|
-| `00-config.sh` | Variables compartidas (no crea nada, se importa con `source`) |
-| `01-enable-apis.sh` | Habilita Cloud Run, Cloud SQL, Storage, Artifact Registry, Secret Manager, Cloud Build, Vertex AI |
-| `02-service-accounts-iam.sh` | Service account de runtime + roles mínimos (`cloudsql.client`, `storage.objectAdmin`, `secretmanager.secretAccessor`, `aiplatform.user`) |
-| `03-cloud-sql.sh` | Instancia Postgres 16, base de datos, usuario, y guarda `DATABASE_URL` en Secret Manager |
-| `04-storage-bucket.sh` | Bucket GCS para imágenes + CORS |
-| `05-artifact-registry.sh` | Repositorio Docker |
-| `06-secrets.sh` | `JWT_SECRET_KEY` (autogenerado) y `GOOGLE_CLIENT_ID` en Secret Manager |
-| `07-build-push.sh` | Build con Cloud Build (sin necesidad de Docker local) y push a Artifact Registry |
-| `08-deploy-backend.sh` | Cloud Run del backend, conectado a Cloud SQL por Unix socket, secretos inyectados |
-| `09-deploy-frontend.sh` | Cloud Run del frontend (nginx sirviendo el build de Vite) |
-| `11-setup-firestore.sh` | Base de datos de Firestore (historial de chat IA y de Vision) — ver `docs/BONUS_FEATURES.md` |
-| `12-reset-data.sh` | Borra TODOS los datos (usuarios, colección, chat, Vision) sin borrar la infraestructura — para "empezar limpio" (pide confirmación explícita) |
-| `99-teardown.sh` | Borra todo lo anterior (pide confirmación explícita) |
-
-## 4. Verificar el despliegue
+Verificación:
 
 ```bash
 curl "$(cat infra/gcp/.last-backend-url)/health"
 # {"status":"ok","service":"PokéDex Manager API","environment":"production"}
 ```
 
-Abre la URL del frontend (`cat infra/gcp/.last-frontend-url`) en el navegador
-e inicia sesión con Google.
+La URL del frontend (`cat infra/gcp/.last-frontend-url`) es la que abre el
+navegador para iniciar sesión con Google.
 
-## 5. Costos y limpieza
+### Actualizaciones posteriores
 
-Todos los recursos usados (`db-f1-micro`, Cloud Run con `min-instances=0`,
-bucket estándar) están dentro o cerca del *free tier* de GCP para uso de
-demo/evaluación. Aun así, para no dejar nada facturando:
+Con la infraestructura ya creada, un cambio de código solo necesita
+reconstruir y redesplegar (no hace falta repetir `01`-`06`, que ya hicieron
+su trabajo):
 
 ```bash
 cd infra/gcp
-./99-teardown.sh
+export PROJECT_ID=tu-proyecto-gcp
+
+./07-build-push.sh
+./08-deploy-backend.sh
+
+export BACKEND_URL=$(cat .last-backend-url)
+./07-build-push.sh
+./09-deploy-frontend.sh
 ```
 
-## 5b. Reiniciar los datos sin borrar la infraestructura
+Con el pipeline de CI/CD configurado (ver [`CI_CD.md`](CI_CD.md)), esto
+ocurre automáticamente en cada push a `main`.
 
-Para "empezar limpio" antes de una demo o entrega — sin usuarios, colección,
-historial de chat ni de Vision — pero SIN tener que volver a desplegar nada
-(la infraestructura se queda tal cual):
+## Reiniciar los datos sin borrar la infraestructura
+
+Para vaciar usuarios, colección, historial de chat y de Vision — dejando la
+app lista para usarse de inmediato, sin tener que volver a desplegar nada:
 
 ```bash
 cd infra/gcp
@@ -103,21 +116,33 @@ export PROJECT_ID=tu-proyecto-gcp
 ```
 
 Pide confirmación explícita antes de borrar nada. Vacía las tablas de Cloud
-SQL (conserva el esquema), borra las imágenes del bucket de Cloud Storage, y
-borra los documentos de Firestore (`mcp_conversations`, `vision_history`).
-Requiere `psql` instalado localmente (para el paso de Cloud SQL — ya viene en
-Cloud Shell) y credenciales de aplicación por defecto (`gcloud auth
-application-default login`) para el paso de Firestore.
+SQL (conserva el esquema — no hace falta volver a correr las migraciones de
+Alembic), borra las imágenes del bucket de Cloud Storage, y borra los
+documentos de Firestore (`mcp_conversations`, `vision_history`). Requiere
+`psql` instalado localmente (ya viene en Cloud Shell) y credenciales de
+aplicación por defecto (`gcloud auth application-default login`) para el
+paso de Firestore.
 
-Esto es distinto de `99-teardown.sh`: ese SÍ elimina la infraestructura en
+Esto es distinto de `99-teardown.sh`: ese sí elimina la infraestructura en
 sí (instancias, servicios, el bucket); `12-reset-data.sh` solo vacía los
-datos, la app queda lista para usarse de inmediato.
+datos.
 
-## 6. De `.sh` a Terraform (siguiente paso natural)
+## Costos y limpieza
 
-Estos scripts son intencionalmente simples (según lo pedido) y aptos para 3
-días de desarrollo. Si el proyecto creciera, el siguiente paso natural es
-convertir cada script en un módulo de Terraform (o Pulumi) para tener estado
+Todos los recursos usados (`db-f1-micro`, Cloud Run con `min-instances=0`,
+bucket estándar) están dentro o cerca del *free tier* de GCP para uso de
+demo/evaluación. Para no dejar nada facturando:
+
+```bash
+cd infra/gcp
+./99-teardown.sh
+```
+
+## De `.sh` a Terraform (siguiente paso natural)
+
+Estos scripts son intencionalmente simples y aptos para un desarrollo de
+pocos días. Si el proyecto creciera, el siguiente paso natural es convertir
+cada script en un módulo de Terraform (o Pulumi) para tener estado
 declarativo, `plan`/`apply` y detección de drift — la lógica de qué recursos
 se necesitan y con qué configuración ya está resuelta aquí y se traduce casi
 1:1.

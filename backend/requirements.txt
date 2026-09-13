@@ -15,7 +15,7 @@ cachetools==5.5.0
 
 # --- IA (funcionalidades bonus) ---
 google-genai==2.23.0            # Gemini 2.5 Flash vía Vertex AI (vision + insights)
-anthropic==1.5.0                # Claude Sonnet 5 (chat MCP sobre la colección)
+anthropic==1.5.0                # Claude (chat MCP sobre la colección; Haiku 4.5 por defecto)
 mcp==1.27.0                     # Model Context Protocol SDK (servidor de tools en memoria)
 google-cloud-firestore==2.30.0  # persistencia de conversaciones del chat MCP
 

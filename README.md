@@ -1,20 +1,28 @@
 # PokéDex Manager
 
 Aplicación web full-stack para gestionar una colección personal de Pokémon:
-inicio de sesión con Google, exploración de la Pokédex (vía PokéAPI) y una
-colección propia con edición, favoritos y notas.
+inicio de sesión con Google, exploración de la Pokédex completa (vía
+PokéAPI), una colección propia con CRUD completo, y tres funcionalidades de
+IA — identificar Pokémon por foto, chatear sobre la colección propia, e
+insights del equipo actual.
+
+**🔗 Instancia pública (GCP), lista para probar:**
+[pokedex-manager-frontend-472849722290.us-central1.run.app/login](https://pokedex-manager-frontend-472849722290.us-central1.run.app/login)
 
 ```mermaid
 flowchart TD
     U["Usuario"] -->|Google Sign-In| FE["Frontend — React + Vite + Tailwind"]
     FE -->|JWT Bearer| BE["Backend — FastAPI"]
     BE --> PA["PokéAPI (externa, solo lectura)"]
-    BE --> DB[("PostgreSQL")]
-    BE --> GCS[("Cloud Storage / disco local")]
+    BE --> DB[("Cloud SQL — PostgreSQL")]
+    BE --> GCS[("Cloud Storage")]
+    BE -->|Vertex AI / Model Garden| GEM["Gemini 2.5 Flash<br/>Vision + Insights"]
+    BE -->|API directa + MCP| CL["Claude<br/>Chat sobre la colección"]
+    BE --> FS[("Firestore<br/>historial de chat y Vision")]
 ```
 
-Ver [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) para el diagrama completo y
-las decisiones de diseño, y [`docs/POKEAPI_DECISION.md`](docs/POKEAPI_DECISION.md)
+Ver [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) para el diagrama completo
+y las decisiones de diseño, y [`docs/POKEAPI_DECISION.md`](docs/POKEAPI_DECISION.md)
 para cómo se resuelve la integración con la API externa.
 
 ## Stack
@@ -26,53 +34,69 @@ para cómo se resuelve la integración con la API externa.
 | Base de datos | PostgreSQL (Cloud SQL en GCP / contenedor en local) |
 | Auth | Google Identity Services (OAuth2/OIDC) + JWT propio de sesión |
 | Almacenamiento de imágenes | Google Cloud Storage (o disco local en dev) |
-| Infra | Docker Compose (local) + scripts `.sh` para Cloud Run/Cloud SQL/GCS (GCP) |
+| IA — Vision e Insights | Gemini 2.5 Flash vía **Vertex AI / Model Garden** (misma cuenta de servicio y facturación de GCP que el resto del proyecto) |
+| IA — Chat sobre la colección | Claude (API directa de Anthropic), servidor **MCP** propio en memoria, `claude-haiku-4-5` por defecto |
+| Historial de IA | Firestore (Native mode) — conversaciones del chat e identificaciones de Vision |
+| Infra | Docker Compose (local) + scripts `.sh` para Cloud Run / Cloud SQL / GCS / Firestore (GCP) + Cloud Build CI/CD |
 
-## Funcionalidades implementadas (core)
+## Funcionalidades
+
+### Core
 
 - **Autenticación con registro obligatorio**: login y registro son endpoints
-  separados (`/auth/google/login` y `/auth/google/register`). El login
-  **nunca** crea usuarios — si la cuenta de Google no existe en la base de
-  datos, el backend responde 404 y el frontend muestra un formulario de
-  registro autocompletado con el nombre/foto de Google (editable). Solo
-  entran usuarios que completaron el registro. Ver
-  `docs/ARCHITECTURE.md#4-autenticación--flujo-login-y-registro-separados`.
-- **Integración con PokéAPI**: búsqueda y listado paginado de Pokémon
-  (solo lectura, catálogo externo), con caché en el backend (ver
-  `docs/POKEAPI_DECISION.md`).
-- **Gestión de datos y persistencia — CRUD completo de la colección**:
-  crear, leer, actualizar y borrar Pokémon de tu colección personal (apodo,
-  nivel, notas, favorito, imagen propia), estadísticas agregadas
-  (`/collection/stats`). Guía paso a paso para probar el CRUD con Postman:
-  [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md).
-- **Interfaz responsive**: mobile-first, paleta pastel azul/verde-azulado,
-  tarjetas con tipos de Pokémon coloreados, spinner temático (Pokéball).
+  separados. El login nunca crea usuarios — si la cuenta de Google no existe
+  en la base de datos, el backend responde 404 y el frontend muestra un
+  formulario de registro autocompletado (editable). Ver
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#4-autenticación--flujo-login-y-registro-separados).
+- **Integración con PokéAPI**: búsqueda y listado paginado de Pokémon (solo
+  lectura, catálogo externo), con caché en el backend — ver
+  [`docs/POKEAPI_DECISION.md`](docs/POKEAPI_DECISION.md).
+- **CRUD completo de la colección personal**: crear, leer, actualizar y
+  borrar Pokémon (apodo, nivel, notas, favorito, imagen propia), y
+  estadísticas agregadas (`/collection/stats`). Guía para probarlo con
+  Postman: [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md).
+- **Interfaz responsive**: mobile-first, paleta pastel, tarjetas con tipos
+  de Pokémon coloreados, spinner temático.
 
-## Funcionalidades bonus (IA)
+### Bonus (IA)
 
-- **Identificar Pokémon por foto** (`/identificar`): sube una imagen y **Gemini
-  2.5 Flash** (Vertex AI) la identifica — nombre, descripción, fun fact, y (si
-  coincide con la Pokédex real) tipos y ventajas/desventajas.
-- **Chat sobre tu colección** (`/chat`): **Claude Sonnet 5** responde preguntas
-  con acceso real a tu colección vía un servidor **MCP** propio; el historial se
-  guarda en Firestore.
-- **Insights de colección** (`/insights`): equipo ideal, fortalezas/debilidades y
-  sugerencias generadas por IA a partir de tu colección actual.
+- **Identificar Pokémon por foto** (`/identificar`): sube una imagen y
+  **Gemini 2.5 Flash** (Vertex AI) la identifica; tipos, ventajas/desventajas,
+  peso, altura, habilidades y cadena evolutiva se resuelven contra PokéAPI
+  para no depender de que el modelo "recuerde" datos duros.
+- **Chat sobre tu colección** (`/chat`): **Claude** responde con acceso real
+  a la colección del usuario vía un servidor **MCP** propio; soporta varias
+  conversaciones por usuario (con títulos generados por IA) y guarda el
+  historial en Firestore.
+- **Insights de colección** (`/insights`): equipo ideal, fortalezas,
+  debilidades y sugerencias generadas por Gemini 2.5 Flash a partir del
+  equipo actual.
 
-Requieren un par de pasos manuales de configuración (una API key de Anthropic y
-crear la base de Firestore) que **no** son necesarios para las funciones core —
-ver [`docs/BONUS_FEATURES.md`](docs/BONUS_FEATURES.md) para el paso a paso y las
-decisiones de arquitectura detrás de cada una.
+Ambas requieren un par de pasos manuales de configuración (crear la base de
+Firestore y una API key de Anthropic) que **no** son necesarios para las
+funciones core — ver [`docs/BONUS_FEATURES.md`](docs/BONUS_FEATURES.md) para
+el detalle y las decisiones de arquitectura detrás de cada una.
 
-## Cómo correr el proyecto localmente (recomendado para evaluar)
+## Probar la instancia desplegada
 
-Requisitos: Docker y Docker Compose.
+Todo el proyecto vive desplegado en Google Cloud Platform — no hace falta
+instalar nada para evaluarlo:
+
+**[pokedex-manager-frontend-472849722290.us-central1.run.app/login](https://pokedex-manager-frontend-472849722290.us-central1.run.app/login)**
+
+Inicia sesión con cualquier cuenta de Google; si es la primera vez, se
+completa un registro breve.
+
+## Correr el proyecto localmente (opcional)
+
+No es necesario — la app ya está pública en GCP — pero si se prefiere
+evaluar en local, con Docker y Docker Compose:
 
 ```bash
-git clone <url-de-tu-repo> pokedex-manager
+git clone https://github.com/Adr1an-Garc1a/pokedex-manager.git
 cd pokedex-manager
 cp .env.example .env
-# Edita .env y agrega tu Google Client ID (ver sección "Configurar Google Sign-In" abajo)
+# Edita .env y agrega tu Google Client ID (ver "Configurar Google Sign-In" abajo)
 
 docker compose up --build
 ```
@@ -84,7 +108,8 @@ docker compose up --build
 Las migraciones de Alembic corren automáticamente al iniciar el contenedor
 del backend (`alembic upgrade head`).
 
-### Correr sin Docker (backend y frontend por separado)
+<details>
+<summary>Correr sin Docker (backend y frontend por separado)</summary>
 
 ```bash
 # Backend
@@ -101,7 +126,10 @@ npm install
 npm run dev
 ```
 
-### Correr los tests del backend
+</details>
+
+<details>
+<summary>Correr los tests del backend</summary>
 
 ```bash
 cd backend
@@ -109,85 +137,83 @@ source .venv/bin/activate
 pytest -q
 ```
 
-## Configurar Google Sign-In (necesario para poder iniciar sesión)
+</details>
 
-1. Ve a [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
+### Configurar Google Sign-In (necesario para iniciar sesión en local)
+
+1. [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
 2. Configura el "OAuth consent screen" (tipo External, datos básicos).
 3. Crea un **OAuth Client ID** de tipo **Web application**.
 4. En **Authorized JavaScript origins** agrega `http://localhost:5173`.
-5. Copia el Client ID y colócalo en:
-   - `.env` (raíz) → `GOOGLE_CLIENT_ID` y `VITE_GOOGLE_CLIENT_ID`
-   - o `frontend/.env` / variables de entorno del backend si corres sin Docker.
+5. Copia el Client ID en `.env` (raíz) → `GOOGLE_CLIENT_ID` y
+   `VITE_GOOGLE_CLIENT_ID`.
 
-Sin esto, la app funciona pero el botón de Google no podrá autenticar
-(las rutas de la Pokédex y la colección requieren sesión iniciada).
+## Replicar el despliegue en tu propio proyecto de GCP
 
-## Desplegar en Google Cloud Platform (opcional)
+1. Proyecto de GCP con facturación habilitada y `gcloud` autenticado.
+2. Configura el OAuth consent screen (mismo paso que arriba, pero agregando
+   también la URL de Cloud Run del frontend en producción).
+3. Corre los scripts de `infra/gcp/` en orden:
 
-El enunciado aclara que **no es necesario** desplegar en producción, pero se
-incluyen scripts `.sh` completos para hacerlo con Cloud Run + Cloud SQL + GCS.
-Ver la guía paso a paso: [`docs/GCP_DEPLOYMENT.md`](docs/GCP_DEPLOYMENT.md).
+   ```bash
+   cd infra/gcp
+   export PROJECT_ID=tu-proyecto-gcp
+   export GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
 
-```bash
-cd infra/gcp
-export PROJECT_ID=tu-proyecto-gcp
-./01-enable-apis.sh && ./02-service-accounts-iam.sh && ./03-cloud-sql.sh \
-  && ./04-storage-bucket.sh && ./05-artifact-registry.sh && ./06-secrets.sh \
-  && ./07-build-push.sh && ./08-deploy-backend.sh && ./09-deploy-frontend.sh
-```
+   ./01-enable-apis.sh && ./02-service-accounts-iam.sh && ./03-cloud-sql.sh \
+     && ./04-storage-bucket.sh && ./05-artifact-registry.sh && ./06-secrets.sh \
+     && ./11-setup-firestore.sh && ./07-build-push.sh && ./08-deploy-backend.sh
 
-### CI/CD — desplegar automáticamente en cada push
+   export BACKEND_URL=$(cat .last-backend-url)
+   ./07-build-push.sh && ./09-deploy-frontend.sh
+   ```
 
-Por defecto lo anterior es manual. Si quieres que un `git push` a `main`
-dispare el build y el deploy solo (sin guardar llaves de service account en
-GitHub), sigue [`docs/CI_CD.md`](docs/CI_CD.md) — usa Cloud Build Triggers
-conectado directo a tu repo.
+4. (Opcional) Activa el pipeline de CI/CD para que un `git push` a `main`
+   dispare el build y el deploy solo — ver [`docs/CI_CD.md`](docs/CI_CD.md).
+5. (Opcional) Configura las funcionalidades bonus de IA (Firestore + API key
+   de Anthropic) — ver [`docs/BONUS_FEATURES.md`](docs/BONUS_FEATURES.md).
 
-### ¿Ya desplegaste antes y solo actualizaste el código?
-
-Ver [`docs/MANUAL_EJECUCION.md`](docs/MANUAL_EJECUCION.md) para el manual
-completo de cómo correr esta versión (local y actualizando un despliegue de
-GCP que ya existía).
+El detalle completo de cada script, qué recurso crea, y cómo actualizar un
+despliegue ya existente está en [`docs/GCP_DEPLOYMENT.md`](docs/GCP_DEPLOYMENT.md).
 
 ## Estructura del repositorio
 
 ```
 pokedex-manager/
-├── backend/         # FastAPI — ver backend/app
-├── frontend/         # React + Vite + Tailwind — ver frontend/src
-├── infra/gcp/        # scripts .sh para aprovisionar GCP
-├── docs/             # arquitectura, decisión de PokéAPI, guía de despliegue
-├── docker-compose.yml
+├── backend/          # FastAPI — ver backend/app
+├── frontend/          # React + Vite + Tailwind — ver frontend/src
+├── infra/gcp/          # scripts .sh para aprovisionar y desplegar en GCP
+├── docs/              # arquitectura, funcionalidades bonus, CI/CD, despliegue, Postman
+├── cloudbuild.yaml    # pipeline de CI/CD (ver docs/CI_CD.md)
+├── docker-compose.yml # entorno local: postgres + backend + frontend
 └── .env.example
 ```
 
-## Subir este proyecto a GitHub
+## Documentación
 
-Este repositorio ya viene inicializado con git y un commit inicial. Para
-subirlo a tu cuenta:
+| Documento | Contenido |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Decisiones de arquitectura, modelo de datos, flujo de autenticación |
+| [`docs/BONUS_FEATURES.md`](docs/BONUS_FEATURES.md) | Cómo funcionan Vision, Chat MCP e Insights; configuración y troubleshooting |
+| [`docs/POKEAPI_DECISION.md`](docs/POKEAPI_DECISION.md) | Por qué PokéAPI se consume como fuente externa en vez de replicarla |
+| [`docs/GCP_DEPLOYMENT.md`](docs/GCP_DEPLOYMENT.md) | Qué crea cada script de `infra/gcp/`, orden de ejecución, reinicio de datos |
+| [`docs/CI_CD.md`](docs/CI_CD.md) | Cómo funciona el pipeline de Cloud Build y su configuración |
+| [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md) | Probar la API (CRUD de colección y endpoints de IA) con Postman |
 
-```bash
-# Opción A: con GitHub CLI (gh)
-gh repo create pokedex-manager --private --source=. --remote=origin --push
+## Decisiones técnicas y trade-offs
 
-# Opción B: manualmente
-# 1. Crea un repositorio vacío en https://github.com/new (sin README/licencia)
-# 2. Luego:
-git remote add origin git@github.com:<tu-usuario>/pokedex-manager.git
-git branch -M main
-git push -u origin main
-```
-
-## Decisiones técnicas y honestidad sobre trade-offs
-
-- Se priorizó SQLite/Postgres relacional sobre Firestore porque el dominio
-  (usuario → colección → Pokémon) es naturalmente relacional (ver
-  `docs/ARCHITECTURE.md`).
-- La caché de PokéAPI es en memoria (TTL) para mantener el alcance simple en
-  3 días; en producción real se recomienda Memorystore (Redis) compartido
-  entre instancias de Cloud Run.
-- La subida de imágenes tiene dos backends intercambiables (`local`/`gcs`) vía
-  una variable de entorno, para poder desarrollar y probar sin necesitar
-  credenciales de GCP.
-- No se implementó refresh token / rotación de JWT (el JWT de sesión dura 24h)
-  por alcance de tiempo; queda anotado como mejora futura.
+- Se priorizó PostgreSQL (relacional) sobre Firestore para los datos core
+  (usuario → colección → Pokémon), porque el dominio es naturalmente
+  relacional; Firestore sí se usa, pero solo para el historial de IA
+  (documentos semi-estructurados sin joins) — ver
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+- La caché de PokéAPI es en memoria (TTL); en producción real se
+  recomendaría Memorystore (Redis) compartido entre instancias de Cloud Run.
+- La subida de imágenes tiene dos backends intercambiables (`local`/`gcs`)
+  vía una variable de entorno, para poder desarrollar sin credenciales de
+  GCP.
+- El chat usa Claude Haiku 4.5 por defecto (no Sonnet 5) por costo,
+  configurable con una sola variable de entorno sin tocar código — ver
+  [`docs/BONUS_FEATURES.md`](docs/BONUS_FEATURES.md#modelos-usados).
+- No se implementó refresh token / rotación de JWT (la sesión dura 24h);
+  queda anotado como mejora futura.

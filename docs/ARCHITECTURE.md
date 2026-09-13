@@ -23,7 +23,7 @@ flowchart TD
     BE -->|Signed URLs| GCS[("Cloud Storage Bucket<br/>Imágenes de cartas / capturas")]
     BE -->|"google-genai (Vertex AI)"| VX["Gemini 2.5 Flash<br/>Vision + Insights (bonus)"]
     BE -->|"MCP ClientSession en memoria"| MCP["Servidor MCP en proceso<br/>tools sobre la colección"]
-    MCP -.->|expone al modelo| CL["Claude Sonnet 5<br/>(Anthropic API, chat bonus)"]
+    MCP -.->|expone al modelo| CL["Claude (Anthropic API)<br/>Haiku 4.5 por defecto, chat bonus"]
     BE -->|conversaciones| FS[("Firestore<br/>historial del chat, bonus")]
 ```
 
@@ -137,7 +137,7 @@ Las tres funcionalidades bonus del enunciado ya están implementadas:
   envía a **Gemini 2.5 Flash** (Vertex AI / Model Garden) para identificar el Pokémon;
   las ventajas/desventajas de tipo se calculan aparte contra PokéAPI (no se le pide
   al modelo que "recuerde" la tabla de tipos).
-- **Chat MCP**: `POST /api/v1/ai/chat` — **Claude Sonnet 5** (API de Anthropic)
+- **Chat MCP**: `POST /api/v1/ai/chat` — **Claude** (API de Anthropic, Haiku 4.5 por defecto, configurable a Sonnet 5)
   conversa sobre la colección real del usuario usando un servidor **MCP** (Model
   Context Protocol) con tools (`list_my_collection`, `get_collection_stats`,
   `get_pokemon_info`); el historial se persiste en **Firestore**.
