@@ -25,19 +25,34 @@ Ver [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) para el diagrama completo
 y las decisiones de diseño, y [`docs/POKEAPI_DECISION.md`](docs/POKEAPI_DECISION.md)
 para cómo se resuelve la integración con la API externa.
 
+### Dos APIs, no una
+
+Además de consumir **PokéAPI** (solo lectura, el catálogo público de
+Pokémon), el proyecto crea **su propia API REST con FastAPI** — la
+"PokéDex Manager API" — con **CRUD completo** sobre la colección personal de
+cada usuario: crear, leer, actualizar y borrar Pokémon (apodo, nivel, notas,
+favorito, imagen propia), agregar nuevos Pokémon a la colección, y
+estadísticas agregadas. Esta es la API que persiste datos propios en Cloud
+SQL; PokéAPI nunca se toca en escritura. El detalle de por qué se dividen
+así las responsabilidades está en
+[`docs/POKEAPI_DECISION.md`](docs/POKEAPI_DECISION.md), y la guía completa
+para probar ambas con Postman (incluyendo cómo agregar un Pokémon nuevo a tu
+colección) está en [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md).
+
 ## Stack
 
 | Capa | Tecnología |
 |---|---|
 | Backend | FastAPI (Python 3.11+), SQLAlchemy 2.0, Alembic, `httpx` async |
 | Frontend | React 18 + Vite + TypeScript, Tailwind CSS, TanStack Query, React Router |
-| Base de datos | PostgreSQL (Cloud SQL en GCP / contenedor en local) |
+| Base de datos | PostgreSQL (Cloud SQL en GCP) |
 | Auth | Google Identity Services (OAuth2/OIDC) + JWT propio de sesión |
-| Almacenamiento de imágenes | Google Cloud Storage (o disco local en dev) |
-| IA — Vision e Insights | Gemini 2.5 Flash vía **Vertex AI / Model Garden** (misma cuenta de servicio y facturación de GCP que el resto del proyecto) |
-| IA — Chat sobre la colección | Claude (API directa de Anthropic), servidor **MCP** propio en memoria, `claude-haiku-4-5` por defecto |
+| Almacenamiento de imágenes | Google Cloud Storage |
+| **Función Bonus #1** — Integración con LLMs (Vision) | Gemini 2.5 Flash vía **Vertex AI / Model Garden** — identifica un Pokémon a partir de una foto |
+| **Función Bonus #2** — Integración MCP (Chat) | Claude (API directa de Anthropic), servidor **MCP** propio en memoria, `claude-haiku-4-5` por defecto |
+| **Función Bonus #3** — Insights | Gemini 2.5 Flash vía **Vertex AI / Model Garden** — analiza el equipo actual del usuario |
 | Historial de IA | Firestore (Native mode) — conversaciones del chat e identificaciones de Vision |
-| Infra | Docker Compose (local) + scripts `.sh` para Cloud Run / Cloud SQL / GCS / Firestore (GCP) + Cloud Build CI/CD |
+| Infra | Scripts `.sh` para Cloud Run / Cloud SQL / GCS / Firestore (GCP) + Cloud Build CI/CD |
 
 ## Funcionalidades
 
@@ -60,21 +75,23 @@ para cómo se resuelve la integración con la API externa.
 
 ### Bonus (IA)
 
-- **Identificar Pokémon por foto** (`/identificar`): sube una imagen y
-  **Gemini 2.5 Flash** (Vertex AI) la identifica; tipos, ventajas/desventajas,
-  peso, altura, habilidades y cadena evolutiva se resuelven contra PokéAPI
-  para no depender de que el modelo "recuerde" datos duros.
-- **Chat sobre tu colección** (`/chat`): **Claude** responde con acceso real
-  a la colección del usuario vía un servidor **MCP** propio; soporta varias
-  conversaciones por usuario (con títulos generados por IA) y guarda el
-  historial en Firestore.
-- **Insights de colección** (`/insights`): equipo ideal, fortalezas,
-  debilidades y sugerencias generadas por Gemini 2.5 Flash a partir del
-  equipo actual del usuario (hasta 6 Pokémon — por defecto los primeros que
-  agregó, o los que elija a mano desde Mi Colección si tiene más de 6).
+- **Función Bonus #1 — Integración con LLMs, identificar Pokémon por foto**
+  (`/identificar`): sube una imagen y **Gemini 2.5 Flash** (Vertex AI) la
+  identifica; tipos, ventajas/desventajas, peso, altura, habilidades y cadena
+  evolutiva se resuelven contra PokéAPI para no depender de que el modelo
+  "recuerde" datos duros.
+- **Función Bonus #2 — Integración MCP, chat sobre tu colección** (`/chat`):
+  **Claude** responde con acceso real a la colección del usuario vía un
+  servidor **MCP** propio; soporta varias conversaciones por usuario (con
+  títulos generados por IA) y guarda el historial en Firestore.
+- **Función Bonus #3 — Insights de colección** (`/insights`): equipo ideal,
+  fortalezas, debilidades y sugerencias generadas por Gemini 2.5 Flash a
+  partir del equipo actual del usuario (hasta 6 Pokémon — por defecto los
+  primeros que agregó, o los que elija a mano desde Mi Colección si tiene
+  más de 6).
 
-Ambas requieren un par de pasos manuales de configuración (crear la base de
-Firestore y una API key de Anthropic) que **no** son necesarios para las
+Las tres requieren un par de pasos manuales de configuración (crear la base
+de Firestore y una API key de Anthropic) que **no** son necesarios para las
 funciones core — ver [`docs/BONUS_FEATURES.md`](docs/BONUS_FEATURES.md) para
 el detalle y las decisiones de arquitectura detrás de cada una.
 
@@ -131,18 +148,45 @@ credencial de GCP/Anthropic — los servicios externos están mockeados).
 El detalle completo de cada script, qué recurso crea, y cómo actualizar un
 despliegue ya existente está en [`docs/GCP_DEPLOYMENT.md`](docs/GCP_DEPLOYMENT.md).
 
-## Estructura del repositorio
+## Estructura del proyecto
+
+Es un monorepo con dos apps (backend y frontend) y una carpeta `infra/gcp/`
+con todo lo necesario para desplegarlo, más `docs/` con la documentación de
+referencia:
 
 ```
 pokedex-manager/
-├── backend/          # FastAPI — ver backend/app
-├── frontend/          # React + Vite + Tailwind — ver frontend/src
-├── infra/gcp/          # scripts .sh para aprovisionar y desplegar en GCP
-├── docs/              # arquitectura, funcionalidades bonus, CI/CD, despliegue, Postman
-├── cloudbuild.yaml    # pipeline de CI/CD (ver docs/CI_CD.md)
-├── docker-compose.yml # entorno local: postgres + backend + frontend
-└── .env.example
+├── backend/            # FastAPI + SQLAlchemy + Alembic
+│   ├── app/
+│   │   ├── core/        # config, seguridad (JWT, Google OIDC), logging
+│   │   ├── db/           # engine/sesión de SQLAlchemy
+│   │   ├── models/       # User, CollectionEntry (ORM)
+│   │   ├── schemas/     # Pydantic (validación de request/response)
+│   │   ├── services/    # PokeAPIClient, StorageService (GCS), team.py, services/ai/*
+│   │   └── api/v1/      # routers: auth, pokemon, collection, ai
+│   ├── migrations/       # Alembic
+│   └── tests/            # pytest (mockea Google/PokéAPI/Vertex/Anthropic/Firestore)
+├── frontend/            # React + Vite + Tailwind + TanStack Query
+│   └── src/
+│       ├── api/          # cliente HTTP tipado por recurso
+│       ├── context/     # AuthContext (JWT, usuario en sesión)
+│       ├── components/  # Navbar, PokemonCard, TypeBadge, etc.
+│       ├── pages/        # Login, Pokédex, Mi Colección, Chat IA, Insights, Vision
+│       └── utils/        # caché local (historial de chat / Vision) por usuario
+├── infra/gcp/           # scripts .sh numerados para aprovisionar y desplegar en GCP
+├── docs/                # arquitectura, funcionalidades bonus, CI/CD, despliegue, Postman
+└── cloudbuild.yaml      # pipeline de CI/CD (ver docs/CI_CD.md)
 ```
+
+Separación de responsabilidades: el frontend nunca habla directamente con
+PokéAPI ni con Cloud SQL — todo pasa por el backend, que es el único que
+conoce credenciales, cachea llamadas externas y aplica reglas de negocio.
+Dentro del backend, `api/v1/` son los routers (HTTP), `services/` es donde
+vive la lógica de negocio y las integraciones externas (PokéAPI, GCS,
+Vertex AI, Anthropic/MCP), y `models/`/`schemas/` separan el ORM (lo que se
+guarda) de los contratos de la API (lo que se expone). El detalle completo
+de cada decisión de arquitectura está en
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Documentación
 
@@ -154,6 +198,7 @@ pokedex-manager/
 | [`docs/GCP_DEPLOYMENT.md`](docs/GCP_DEPLOYMENT.md) | Qué crea cada script de `infra/gcp/`, orden de ejecución, reinicio de datos |
 | [`docs/CI_CD.md`](docs/CI_CD.md) | Cómo funciona el pipeline de Cloud Build y su configuración |
 | [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md) | Probar la API (CRUD de colección y endpoints de IA) con Postman |
+| [`docs/Documentacion_de_Nube_GCP.pdf`](docs/Documentacion_de_Nube_GCP.pdf) | Documentación formal del proyecto de nube: contexto, IAM, cómputo, datos e IA, CI/CD y recomendaciones para producción |
 
 ## Decisiones técnicas y trade-offs
 

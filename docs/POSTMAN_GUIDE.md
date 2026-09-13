@@ -1,16 +1,5 @@
 # Probar la API con Postman
 
-Esta guía es para quien nunca ha usado Postman. Cubre cómo probar el CRUD
-completo de la colección personal (crear, leer, editar, borrar un Pokémon de
-tu colección) y el proxy de solo lectura hacia PokéAPI.
-
-> **Resumen de lo que ya existe:** el catálogo de Pokémon (`GET /pokemon...`)
-> es de **solo lectura** porque viene de una API externa de terceros — no
-> tendría sentido "editar" un Pokémon del catálogo. Lo que sí es tuyo y
-> tiene **CRUD completo** (crear, leer, actualizar, borrar) es tu **colección
-> personal** (`/collection`): cada Pokémon que agregas ahí es un registro
-> propio en tu base de datos, con tu apodo, nivel, notas, favorito, etc.
-
 ## 0. Instalar Postman
 
 Descarga la app de escritorio desde https://www.postman.com/downloads/ (o usa
@@ -21,8 +10,7 @@ go to the app" para no crear cuenta).
 
 La API usa JWT (`Authorization: Bearer <token>`) para las rutas protegidas.
 Como el login es con Google, la forma más simple de conseguir un token es
-iniciar sesión una vez desde el navegador, en la instancia ya desplegada
-(o en tu propia copia corriendo en local, si levantaste `docker compose up`),
+iniciar sesión una vez desde el navegador, en la instancia desplegada en GCP,
 y copiar el token:
 
 1. Abre la app en el navegador e inicia sesión con Google (si es la primera
@@ -45,10 +33,9 @@ ve a la respuesta (**Response**) y copia el campo `"access_token"`.
 
 1. Abre Postman → **New** → **Collection** → nómbrala `PokéDex Manager API`.
 2. Click en la colección → pestaña **Variables** → agrega:
-   - `base_url` = `http://localhost:8000/api/v1` (si corres local con Docker
-     Compose) o la URL del **backend** en Cloud Run + `/api/v1` (si
-     desplegaste en GCP, la encuentras en `infra/gcp/.last-backend-url`, o
-     con `gcloud run services describe pokedex-manager-backend
+   - `base_url` = la URL del **backend** en Cloud Run + `/api/v1` (la
+     encuentras en `infra/gcp/.last-backend-url`, o con
+     `gcloud run services describe pokedex-manager-backend
      --region=us-central1 --format='value(status.url)'`).
    - `token` = el JWT que copiaste en el paso 1.
 3. Pestaña **Authorization** de la colección → Type: **Bearer Token** → Token:
@@ -84,7 +71,11 @@ aunque heredarla no hace daño):
 
 ## 4. Requests de tu colección (CRUD completo, sí requieren tu token)
 
-Crea otra carpeta "Mi Colección":
+Crea otra carpeta "Mi Colección". Al terminar, tu colección de Postman debería
+verse así (una carpeta por cada grupo de requests, con las del CRUD de la
+colección agrupadas bajo "Mi coleccion"):
+
+![Colección de Postman con las requests de "Mi coleccion": Get Collection, Get Collection Stats, Delete Pokemon, Upload Image, Add Pokemon, Update Pokemon](assets/postman-coleccion.png)
 
 ### 4.1 Leer (GET)
 
@@ -143,23 +134,7 @@ Crea otra carpeta "Mi Colección":
   imagen de tu computadora.
 - Send → `200 OK` con `custom_image_url` apuntando a la imagen guardada.
 
-## 5. Probar la validación de "no lo dejes entrar si no está registrado"
-
-Para ver el flujo de registro obligatorio en acción directamente desde
-Postman (sin frontend), necesitas un `id_token` de Google real, lo cual
-Postman no puede generar por sí solo (requiere el flujo OAuth completo del
-navegador). La forma práctica de verlo:
-
-1. Inicia sesión con una cuenta de Google que **nunca** hayas usado en la
-   app → el backend responde `404` con `code: "user_not_registered"` (esto
-   ya lo ves en el navegador, en la pestaña Network, en la petición a
-   `/auth/google/login`).
-2. Completa el formulario de registro en el frontend → dispara
-   `/auth/google/register` → `201 Created`.
-3. Copia el nuevo token a Postman (paso 1 de esta guía) y ya puedes probar
-   el CRUD de colección con esa cuenta.
-
-## 6. Errores comunes al probar
+## 5. Errores comunes al probar
 
 | Respuesta | Causa | Solución |
 |---|---|---|

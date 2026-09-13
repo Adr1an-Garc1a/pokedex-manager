@@ -2,11 +2,24 @@
 
 ## 1. Resumen
 
-PokéDex Manager es una aplicación full-stack para gestionar una colección personal de
-Pokémon. La arquitectura sigue la propuesta original (Cloud Run + Cloud SQL + Google
-Sign-In + Vertex AI) **simplificada para un desarrollo de 3 días** para el núcleo
-(core), y ya incluye las tres funcionalidades bonus de IA (Vision, chat MCP,
-insights) — ver `docs/BONUS_FEATURES.md` para el detalle completo de esa parte.
+PokéDex Manager es una aplicación full-stack para gestionar una colección personal
+de Pokémon: login con Google, exploración del catálogo público de PokéAPI, una
+colección propia con CRUD completo, y tres funcionalidades bonus de IA (identificar
+Pokémon por foto, chat sobre la colección vía MCP, e insights del equipo actual).
+
+A nivel de arquitectura, el **core** es Cloud Run (frontend + backend) + Cloud SQL
+(PostgreSQL, datos relacionales) + Google Sign-In (autenticación) + Cloud Storage
+(imágenes); el **bonus de IA** suma Vertex AI / Model Garden (Gemini 2.5 Flash, para
+Vision e Insights), la API directa de Anthropic (Claude, para el chat vía un servidor
+MCP propio) y Firestore (historial de chat y de Vision) — el detalle completo de esa
+parte está en `docs/BONUS_FEATURES.md`.
+
+Además del proxy de solo lectura hacia PokéAPI, el backend expone su propia **API
+REST (FastAPI)** para el CRUD completo de la colección personal de cada usuario
+(crear, leer, actualizar y borrar Pokémon, con apodo, nivel, notas, favorito e
+imagen propia) — ver `docs/POKEAPI_DECISION.md` para por qué existen dos APIs
+distintas, y [`docs/POSTMAN_GUIDE.md`](POSTMAN_GUIDE.md) para probarla directamente
+con Postman.
 
 ```mermaid
 flowchart TD
@@ -32,13 +45,12 @@ flowchart TD
 | Decisión | Alternativa considerada | Por qué se eligió |
 |---|---|---|
 | **FastAPI** (Python 3.11+) | Node/Express, Django | Async nativo, Pydantic para validación estricta, Swagger/OpenAPI autogenerado, se integra de forma natural con `google-auth`, `httpx` y los SDKs de Vertex AI para la Fase 2. |
-| **React + Vite + Tailwind** | Next.js, Vue | Vite da un ciclo de desarrollo muy rápido para 3 días; Tailwind permite iterar el look pastel/responsive sin escribir CSS a mano; no necesitamos SSR (no hay requisito de SEO). |
+| **React + Vite + Tailwind** | Next.js, Vue | Vite da un ciclo de desarrollo rápido; Tailwind permite iterar el look pastel/responsive sin escribir CSS a mano; no necesitamos SSR (no hay requisito de SEO). |
 | **Cloud SQL (PostgreSQL)** en vez de Firestore, para los datos core | Firestore | El dominio es relacional por naturaleza (usuarios 1‑N colección, cada entrada referencia un `pokemon_id` de un catálogo fijo). Un modelo relacional facilita filtros y agregaciones (conteo por tipo, etc.) y migraciones versionadas con Alembic. Firestore sí se usa, pero solo para un dato que no es relacional: el historial del chat MCP (bonus) — ver `docs/BONUS_FEATURES.md`. |
 | **Cloud Storage para imágenes** | BLOB en la base de datos | Costo y rendimiento: la base solo guarda la URL (firmada o pública), nunca el binario. |
 | **Google Sign-In (OAuth2 / OIDC)** | Auth propia con usuario/contraseña | Cumple "sistema de autenticación básico" sin reinventar manejo de contraseñas; el frontend obtiene un `id_token` de Google, el backend lo valida con `google-auth` y emite su propio JWT de sesión (para no atar toda request a Google). |
-| **Alembic** para migraciones | `Base.metadata.create_all` | Buenas prácticas: control de versiones del esquema, reproducible en cualquier entorno (local, CI, Cloud SQL). |
-| **Docker Compose para desarrollo local** | Solo instrucciones manuales | Un solo comando (`docker compose up`) levanta Postgres + backend + frontend; imprescindible porque el enunciado dice "no es necesario desplegar en producción". |
-| **Scripts `.sh` (no Terraform)** | Terraform / Pulumi | El usuario pidió explícitamente `.sh`. Se documentan como scripts idempotentes y ordenados numéricamente; si el proyecto crece, migrar a Terraform es el siguiente paso natural (se menciona en `infra/gcp/README.md`). |
+| **Alembic** para migraciones | `Base.metadata.create_all` | Buenas prácticas: control de versiones del esquema, reproducible en cualquier entorno (CI, Cloud SQL). |
+| **Scripts `.sh` (no Terraform)** | Terraform / Pulumi | Se pidió explícitamente `.sh`. Se documentan como scripts idempotentes y ordenados numéricamente para desplegar y operar el proyecto en GCP — ver [`docs/GCP_DEPLOYMENT.md`](GCP_DEPLOYMENT.md). Si el proyecto crece, migrar a Terraform es el siguiente paso natural. |
 
 ## 3. Estructura del monorepo
 
@@ -60,9 +72,8 @@ pokedex-manager/
 │       ├── context/    # AuthContext (JWT, usuario)
 │       ├── components/ # Navbar, PokemonCard, TypeBadge, etc.
 │       └── pages/      # Login, Pokédex, Mi Colección
-├── infra/gcp/          # scripts .sh numerados para aprovisionar GCP
-├── docs/               # este documento, decisión de PokéAPI, guía de despliegue
-└── docker-compose.yml  # entorno local: postgres + backend + frontend
+├── infra/gcp/          # scripts .sh numerados para aprovisionar y desplegar en GCP
+└── docs/               # este documento, decisión de PokéAPI, guía de despliegue, Postman
 ```
 
 Separación de responsabilidades: el frontend nunca habla directamente con PokéAPI ni
@@ -139,8 +150,8 @@ Las tres funcionalidades bonus del enunciado ya están implementadas:
   al modelo que "recuerde" la tabla de tipos).
 - **Chat MCP**: `POST /api/v1/ai/chat` — **Claude** (API de Anthropic, Haiku 4.5 por defecto, configurable a Sonnet 5)
   conversa sobre la colección real del usuario usando un servidor **MCP** (Model
-  Context Protocol) con tools (`list_my_collection`, `get_collection_stats`,
-  `get_pokemon_info`); el historial se persiste en **Firestore**.
+  Context Protocol) con tools (`list_my_collection`, `get_my_team`,
+  `get_collection_stats`, `get_pokemon_info`); el historial se persiste en **Firestore**.
 - **Insights**: `GET /api/v1/ai/insights` — Gemini 2.5 Flash analiza la colección
   actual y devuelve equipo ideal, fortalezas/debilidades, fun facts y alternativas.
 
