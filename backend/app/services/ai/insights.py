@@ -138,8 +138,9 @@ async def generate_collection_insights(entries: list[CollectionEntry]) -> Collec
 
     summary = _summarize_collection(entries)
     prompt = (
-        f"Estos son los primeros {len(entries)} Pokémon que el usuario agregó a su "
-        f"colección, en el orden en que los agregó:\n\n{summary}\n\n"
+        f"Este es el equipo actual de {len(entries)} Pokémon del usuario "
+        f"(elegido por él, o por defecto los primeros que agregó a su "
+        f"colección):\n\n{summary}\n\n"
         "Genera el análisis según el esquema JSON solicitado, basado específicamente "
         "en este equipo."
     )

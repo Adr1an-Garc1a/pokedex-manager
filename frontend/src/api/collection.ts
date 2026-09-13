@@ -30,6 +30,13 @@ export async function deleteCollectionEntry(id: number): Promise<void> {
   await apiClient.delete(`/collection/${id}`);
 }
 
+export async function updateMyTeam(entryIds: number[]): Promise<CollectionEntry[]> {
+  const { data } = await apiClient.put<CollectionEntry[]>("/collection/team", {
+    entry_ids: entryIds,
+  });
+  return data;
+}
+
 export async function uploadEntryImage(id: number, file: File): Promise<CollectionEntry> {
   const formData = new FormData();
   formData.append("file", file);

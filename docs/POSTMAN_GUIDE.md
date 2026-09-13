@@ -21,8 +21,9 @@ go to the app" para no crear cuenta).
 
 La API usa JWT (`Authorization: Bearer <token>`) para las rutas protegidas.
 Como el login es con Google, la forma más simple de conseguir un token es
-iniciar sesión una vez desde el navegador, en tu propia app ya corriendo
-(local con `docker compose up`, o la URL de Cloud Run), y copiar el token:
+iniciar sesión una vez desde el navegador, en la instancia ya desplegada
+(o en tu propia copia corriendo en local, si levantaste `docker compose up`),
+y copiar el token:
 
 1. Abre la app en el navegador e inicia sesión con Google (si es la primera
    vez, completa el formulario de registro que aparece).

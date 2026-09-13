@@ -1,11 +1,11 @@
 # Despliegue en Google Cloud Platform
 
 > **Nota:** el enunciado de la prueba no exige que la aplicación esté
-> desplegada en producción — `docker compose up` (ver el
-> [README](../README.md)) es suficiente para evaluar el proyecto. Esta guía
-> documenta el despliegue en GCP porque se pidió explícitamente como parte
-> del ejercicio (arquitectura + scripts `.sh`), y porque la instancia pública
-> del proyecto (enlazada en el README) corre sobre esta misma infraestructura.
+> desplegada en producción — esta guía documenta el despliegue en GCP porque
+> se pidió explícitamente como parte del ejercicio (arquitectura + scripts
+> `.sh`), y porque la instancia pública del proyecto (enlazada en el
+> [README](../README.md)) corre sobre esta misma infraestructura y es la
+> forma recomendada de evaluarlo.
 
 ## Prerrequisitos
 

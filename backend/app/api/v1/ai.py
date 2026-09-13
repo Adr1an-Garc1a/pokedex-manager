@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.collection import CollectionEntry
 from app.models.user import User
 from app.schemas.ai import (
     ChatMessage,
@@ -29,6 +28,7 @@ from app.schemas.ai import (
 from app.services.ai.chat import run_pokedex_chat
 from app.services.ai.insights import generate_collection_insights
 from app.services.ai.vision import identify_pokemon_from_image
+from app.services.team import get_effective_team
 from app.services.firestore_client import (
     create_thread,
     delete_thread,
@@ -130,20 +130,15 @@ async def insights(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # El análisis siempre se basa en los PRIMEROS 6 Pokémon que el usuario
-    # agregó (orden cronológico de creación), aunque tenga más en su
-    # colección — pedido explícito: "basado en los primeros 6 pokemon de su
-    # coleccion (en caso de que tenga mas)".
-    all_entries = (
-        db.query(CollectionEntry)
-        .filter(CollectionEntry.user_id == current_user.id)
-        .order_by(CollectionEntry.created_at.asc())
-        .all()
-    )
-    if not all_entries:
+    # El análisis se basa en el "equipo efectivo" del usuario (hasta 6): el
+    # que eligió a mano con PUT /collection/team si ya lo hizo, o si no, los
+    # primeros 6 Pokémon que agregó (comportamiento por defecto, ver
+    # app/services/team.py) — así una colección de 6 o menos nunca necesita
+    # elegir nada.
+    team = get_effective_team(db, current_user.id)
+    if not team:
         raise HTTPException(
             status_code=422,
             detail="Agrega al menos un Pokémon a tu colección para poder generar insights.",
         )
-    first_six = all_entries[:6]
-    return await generate_collection_insights(first_six)
+    return await generate_collection_insights(team)

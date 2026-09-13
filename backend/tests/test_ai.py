@@ -924,3 +924,48 @@ def test_insights_returns_structured_result_limited_to_first_six(client, monkeyp
     assert body["ideal_team"][0]["sprite_url"] == "https://example.com/25.png"
     assert body["ideal_team"][1]["already_in_collection"] is False
     assert body["ideal_team"][1]["alternatives"][0]["pokemon_name"] == "excadrill"
+
+
+def test_insights_uses_hand_picked_team_instead_of_first_six(client, monkeypatch):
+    """Con más de 6 Pokémon y un equipo elegido a mano (PUT /collection/team),
+    Insights debe analizar ESE equipo — no volver a caer en los primeros 6
+    agregados (ver app/services/team.py)."""
+    token = _register_and_get_token(
+        client, monkeypatch, sub="sub-insights-team", email="insightsteam@example.com",
+        name="Insights Equipo",
+    )
+
+    async def fake_get_pokemon(self, id_or_name):
+        return _fake_pikachu()
+
+    monkeypatch.setattr(pokeapi_client_module.PokeAPIClient, "get_pokemon", fake_get_pokemon)
+
+    entry_ids = []
+    for _ in range(8):
+        add_response = client.post(
+            "/api/v1/collection",
+            json={"pokemon_id": 25},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert add_response.status_code == 201, add_response.text
+        entry_ids.append(add_response.json()["id"])
+
+    chosen = entry_ids[-3:]  # NO son los primeros 6 por fecha de creación
+    team_response = client.put(
+        "/api/v1/collection/team",
+        json={"entry_ids": chosen},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert team_response.status_code == 200, team_response.text
+
+    async def fake_generate_structured_json(*, parts, response_schema, system_instruction):
+        return _fake_insights_payload()
+
+    monkeypatch.setattr(
+        "app.services.ai.insights.generate_structured_json", fake_generate_structured_json
+    )
+
+    response = client.get("/api/v1/ai/insights", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200, response.text
+    # El equipo efectivo tiene exactamente los 3 elegidos a mano, no 6.
+    assert len(response.json()["analyzed_team"]) == 3

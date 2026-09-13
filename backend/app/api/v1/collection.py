@@ -12,6 +12,7 @@ from app.schemas.collection import (
     CollectionEntryRead,
     CollectionEntryUpdate,
     CollectionStats,
+    TeamUpdate,
 )
 from app.services.pokeapi_client import get_pokeapi_client
 from app.services.storage import get_storage_service
@@ -55,6 +56,49 @@ def get_collection_stats(
         total=len(entries),
         by_type=dict(type_counter),
         favorites=sum(1 for e in entries if e.is_favorite),
+    )
+
+
+@router.put("/team", response_model=list[CollectionEntryRead])
+def update_my_team(
+    payload: TeamUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Elige a mano el equipo (hasta 6) que Insights va a analizar — pensado
+    para quien tiene más de 6 Pokémon en su colección y quiere decidir cuáles
+    cuentan como su equipo, en vez del comportamiento por defecto (los
+    primeros 6 que agregó). Un `entry_ids` vacío quita a todos del equipo y
+    vuelve a ese comportamiento por defecto.
+
+    Nota de registro de rutas: este endpoint debe declararse ANTES que
+    `PUT /{entry_id}` en este archivo — si no, FastAPI intentaría interpretar
+    "team" como un `entry_id` entero y respondería 422 antes de llegar aquí.
+    """
+    entries = (
+        db.query(CollectionEntry).filter(CollectionEntry.user_id == current_user.id).all()
+    )
+    owned_ids = {entry.id for entry in entries}
+    unknown_ids = sorted(set(payload.entry_ids) - owned_ids)
+    if unknown_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Estos Pokémon no existen en tu colección: {unknown_ids}",
+        )
+
+    selected = set(payload.entry_ids)
+    for entry in entries:
+        entry.is_team_member = entry.id in selected
+    db.commit()
+
+    return (
+        db.query(CollectionEntry)
+        .filter(
+            CollectionEntry.user_id == current_user.id,
+            CollectionEntry.is_team_member.is_(True),
+        )
+        .order_by(CollectionEntry.created_at.asc())
+        .all()
     )
 
 

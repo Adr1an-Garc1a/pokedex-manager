@@ -31,6 +31,13 @@ class CollectionEntry(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
+    # Equipo elegido a mano por el usuario (hasta 6) cuando su colección
+    # tiene más de 6 Pokémon — ver PUT /collection/team. Si nadie ha elegido
+    # un equipo todavía (ningún True en toda la colección), Insights cae de
+    # vuelta a los primeros 6 agregados (ver api/v1/ai.py) para no requerir
+    # este paso a quien tiene 6 o menos.
+    is_team_member: Mapped[bool] = mapped_column(Boolean, default=False)
+
     caught_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

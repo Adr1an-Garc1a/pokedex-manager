@@ -56,6 +56,7 @@ export interface CollectionEntry {
   is_favorite: boolean;
   notes: string | null;
   custom_image_url: string | null;
+  is_team_member: boolean;
   caught_at: string;
   created_at: string;
   updated_at: string;

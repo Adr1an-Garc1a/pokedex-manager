@@ -70,7 +70,8 @@ para cómo se resuelve la integración con la API externa.
   historial en Firestore.
 - **Insights de colección** (`/insights`): equipo ideal, fortalezas,
   debilidades y sugerencias generadas por Gemini 2.5 Flash a partir del
-  equipo actual.
+  equipo actual del usuario (hasta 6 Pokémon — por defecto los primeros que
+  agregó, o los que elija a mano desde Mi Colección si tiene más de 6).
 
 Ambas requieren un par de pasos manuales de configuración (crear la base de
 Firestore y una API key de Anthropic) que **no** son necesarios para las
@@ -87,72 +88,26 @@ instalar nada para evaluarlo:
 Inicia sesión con cualquier cuenta de Google; si es la primera vez, se
 completa un registro breve.
 
-## Correr el proyecto localmente (opcional)
-
-No es necesario — la app ya está pública en GCP — pero si se prefiere
-evaluar en local, con Docker y Docker Compose:
+## Tests del backend
 
 ```bash
-git clone https://github.com/Adr1an-Garc1a/pokedex-manager.git
-cd pokedex-manager
-cp .env.example .env
-# Edita .env y agrega tu Google Client ID (ver "Configurar Google Sign-In" abajo)
-
-docker compose up --build
-```
-
-- Frontend: http://localhost:5173
-- Backend (Swagger UI): http://localhost:8000/docs
-- Backend (health check): http://localhost:8000/health
-
-Las migraciones de Alembic corren automáticamente al iniciar el contenedor
-del backend (`alembic upgrade head`).
-
-<details>
-<summary>Correr sin Docker (backend y frontend por separado)</summary>
-
-```bash
-# Backend
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export $(grep -v '^#' ../.env | xargs)   # o exporta las variables manualmente
-alembic upgrade head
-uvicorn app.main:app --reload
-
-# Frontend (en otra terminal)
-cd frontend
-npm install
-npm run dev
-```
-
-</details>
-
-<details>
-<summary>Correr los tests del backend</summary>
-
-```bash
-cd backend
-source .venv/bin/activate
 pytest -q
 ```
 
-</details>
-
-### Configurar Google Sign-In (necesario para iniciar sesión en local)
-
-1. [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
-2. Configura el "OAuth consent screen" (tipo External, datos básicos).
-3. Crea un **OAuth Client ID** de tipo **Web application**.
-4. En **Authorized JavaScript origins** agrega `http://localhost:5173`.
-5. Copia el Client ID en `.env` (raíz) → `GOOGLE_CLIENT_ID` y
-   `VITE_GOOGLE_CLIENT_ID`.
+Corre contra una base SQLite efímera (no necesita Cloud SQL ni ninguna
+credencial de GCP/Anthropic — los servicios externos están mockeados).
 
 ## Replicar el despliegue en tu propio proyecto de GCP
 
 1. Proyecto de GCP con facturación habilitada y `gcloud` autenticado.
-2. Configura el OAuth consent screen (mismo paso que arriba, pero agregando
-   también la URL de Cloud Run del frontend en producción).
+2. Configura el OAuth consent screen: [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
+   → "OAuth consent screen" (tipo External) → crea un **OAuth Client ID**
+   de tipo **Web application** → en **Authorized JavaScript origins** agrega
+   la URL de Cloud Run del frontend una vez desplegado → copia el Client ID
+   (es `GOOGLE_CLIENT_ID` en el paso siguiente).
 3. Corre los scripts de `infra/gcp/` en orden:
 
    ```bash

@@ -118,9 +118,12 @@ class ChatThreadSummary(BaseModel):
 
 
 class AnalyzedTeamMember(BaseModel):
-    """Uno de los primeros 6 Pokémon de la colección del usuario — el equipo
-    real sobre el que se basa TODO el análisis. Se arma directamente desde la
-    base de datos (no desde el modelo), así que sprite_url siempre es el real."""
+    """Uno de los Pokémon del equipo efectivo del usuario (hasta 6 — el que
+    eligió a mano con PUT /collection/team, o si no eligió ninguno, los
+    primeros que agregó a su colección; ver app/services/team.py) — el
+    equipo real sobre el que se basa TODO el análisis. Se arma directamente
+    desde la base de datos (no desde el modelo), así que sprite_url siempre
+    es el real."""
 
     pokemon_name: str
     sprite_url: str | None = None
@@ -153,7 +156,7 @@ class FunFactEntry(BaseModel):
 class CollectionInsights(BaseModel):
     analyzed_team: list[AnalyzedTeamMember] = Field(
         default_factory=list,
-        description="Los primeros 6 Pokémon de la colección del usuario (o menos si tiene menos) — base de todo el análisis",
+        description="El equipo efectivo del usuario (hasta 6): el elegido a mano, o si no eligió ninguno, los primeros que agregó — base de todo el análisis",
     )
     team_score: int = Field(ge=1, le=10, description="Qué tan bueno es este equipo, de 1 a 10")
     team_score_reason: str = Field(default="", description="Por qué obtuvo ese puntaje")

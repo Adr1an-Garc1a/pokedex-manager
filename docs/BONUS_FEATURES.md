@@ -261,15 +261,23 @@ identificaciones).
 `GET /api/v1/ai/insights` (requiere sesión y al menos 1 Pokémon en la
 colección).
 
-El análisis se basa siempre en los **primeros 6 Pokémon** que se agregaron a
-la colección (por fecha de creación), aunque haya más. A Gemini 2.5 Flash se
-le manda ese resumen (nombres, tipos, apodos, favoritos, niveles) y se le
-pide, con salida JSON estructurada:
+El análisis se basa en el **equipo efectivo** del usuario (hasta 6 Pokémon,
+`app/services/team.py`):
 
-- Un puntaje de 1 a 10 de qué tan bueno es ese equipo de 6, con motivo
-  específico — se muestra como una fila de 10 pokébolas, tantas "llenas"
-  como el puntaje.
-- Fortalezas y debilidades concretas de esos 6 Pokémon (el prompt pide
+- Si el usuario ya eligió un equipo a mano (`PUT /api/v1/collection/team`,
+  botón **"Hacer de mi equipo"** en Mi Colección — solo aparece si tiene más
+  de 6), Insights analiza exactamente esos.
+- Si no ha elegido ninguno todavía, se usa el comportamiento por defecto:
+  los primeros 6 que agregó (por fecha de creación) — así una colección de 6
+  o menos nunca necesita elegir nada.
+
+A Gemini 2.5 Flash se le manda ese resumen (nombres, tipos, apodos,
+favoritos, niveles) y se le pide, con salida JSON estructurada:
+
+- Un puntaje de 1 a 10 de qué tan bueno es ese equipo, con motivo específico
+  — se muestra como una fila de 10 pokébolas, tantas "llenas" como el
+  puntaje.
+- Fortalezas y debilidades concretas de esos Pokémon (el prompt pide
   mencionarlos por nombre, no generalidades).
 - Un equipo ideal de hasta 6, mezclando los que ya se tienen
   (`already_in_collection: true`) con sugerencias nuevas, resaltadas en el
@@ -279,8 +287,25 @@ pide, con salida JSON estructurada:
 
 Los nombres que menciona el modelo se resuelven contra PokéAPI para obtener
 su sprite real — mismo principio que Vision: nunca se le pide al modelo una
-URL de imagen, solo un nombre. El "equipo analizado" (los primeros 6) ni
+URL de imagen, solo un nombre. El "equipo analizado" (el equipo efectivo) ni
 siquiera se resuelve: sale directo de la colección en la base de datos.
+
+### Elegir el equipo a mano
+
+`PUT /api/v1/collection/team` (body `{"entry_ids": [...]}`, hasta 6 ids de
+la propia colección del usuario) reemplaza por completo qué entradas cuentan
+como equipo: pone `is_team_member=true` en las que llegan y `false` en el
+resto de la colección de ese usuario. Un `entry_ids` vacío quita a todos del
+equipo y vuelve al comportamiento por defecto (primeros 6 agregados). El
+endpoint valida que ningún id pertenezca a otro usuario (`404` si no) y que
+no se manden más de 6 (`422` si sí).
+
+En el frontend (`CollectionPage.tsx`), el botón "Hacer de mi equipo" solo
+aparece cuando la colección tiene más de 6 Pokémon — con 6 o menos, el
+equipo siempre es toda la colección, así que no hay nada que elegir. Al
+guardar un equipo nuevo se invalida también la query de Insights (misma
+cuenta), así el próximo análisis usa el equipo recién elegido sin necesidad
+de recargar la página.
 
 ## Aislamiento entre cuentas
 
@@ -384,4 +409,8 @@ Los tres requieren el mismo Bearer token que el resto de la API (ver
   Si `history_persisted` sale `false`, Claude respondió bien pero no se pudo
   guardar ese turno (ver [Solución de problemas](#solución-de-problemas)).
 - `GET /ai/insights` — sin body; requiere al menos un Pokémon en la
-  colección o responde `422`. Solo analiza los primeros 6 aunque haya más.
+  colección o responde `422`. Analiza el equipo efectivo (hasta 6 — ver
+  [Elegir el equipo a mano](#elegir-el-equipo-a-mano)).
+- `PUT /collection/team` — Body raw JSON `{"entry_ids": [1, 2, 3]}` (hasta 6
+  ids, de tu propia colección). `404` si algún id no es tuyo, `422` si son
+  más de 6.

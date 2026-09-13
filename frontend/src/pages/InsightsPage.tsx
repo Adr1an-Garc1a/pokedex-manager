@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import type { AlternativeSuggestion, TeamRecommendation } from "@/types";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 function PokemonSprite({
   name,
@@ -52,7 +53,11 @@ export function InsightsPage() {
         <p className="text-poke-ink-soft">
           ¡Este apartado te da insights importantes a considerar con tu equipo actual!
           Te dice fortalezas, debilidades y recomendaciones para que seas aún más
-          poderoso — basado en los primeros 6 Pokémon que agregaste a tu colección
+          poderoso — basado en tu equipo actual (hasta 6 Pokémon). Si tienes más de 6
+          en tu colección, puedes elegir cuáles forman tu equipo desde{" "}
+          <Link to="/collection" className="font-semibold underline">
+            Mi Colección
+          </Link>{" "}
           (análisis generado con IA, Gemini 2.5 Flash).
         </p>
       </div>
@@ -69,7 +74,7 @@ export function InsightsPage() {
 
       {data && (
         <div className="flex flex-col gap-6">
-          <Section title="🐾 Tu equipo analizado (tus primeros 6)">
+          <Section title="🐾 Tu equipo analizado">
             <div className="flex flex-wrap gap-3">
               {data.analyzed_team.map((member, i) => (
                 <div key={i} className="poke-card flex flex-col items-center gap-1 p-3">
