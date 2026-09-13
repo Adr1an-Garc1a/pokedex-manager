@@ -55,12 +55,17 @@ Flujo:
    con las últimas 50 consultas) — **best effort**: si Firestore falla, la
    identificación ya se le mostró al usuario de todos modos con
    `history_persisted: false`, simplemente no queda guardada para verla
-   después. El frontend, además, mantiene en memoria las identificaciones
-   hechas durante la sesión y las mezcla con lo que devuelve el backend (por
-   `entry_id`) — así el historial de esta sesión se ve completo aunque el
-   guardado en Firestore esté fallando (ver la sección de troubleshooting del
-   chat más abajo — es el mismo permiso de IAM, `roles/datastore.user`, el
-   que cubre ambas colecciones de Firestore).
+   después. El frontend, además, guarda cada identificación en
+   `localStorage` (`utils/visionHistoryCache.ts`), un caché por cuenta de
+   usuario, y lo mezcla con lo que devuelve el backend (por `entry_id`) cada
+   vez que se carga la página — así el historial se sigue viendo completo
+   sin importar a qué otra sección de la app navegue el usuario o si recarga
+   la página, aunque el guardado en Firestore esté fallando (ver la sección
+   de troubleshooting del chat más abajo — es el mismo permiso de IAM,
+   `roles/datastore.user`, el que cubre ambas colecciones de Firestore). El
+   caché de `localStorage` es solo un respaldo del lado del cliente: cuando
+   Firestore sí responde, esa es la fuente de verdad y el caché se
+   "autocura" con ella.
 
 Por qué Vertex AI / Model Garden (y no la API pública de Gemini directamente):
 mantiene todo dentro de la misma cuenta de servicio y facturación de GCP que ya
@@ -149,27 +154,38 @@ sequenceDiagram
 ### Solución de problemas — "el chat no funciona"
 
 Si `/ai/chat` responde 503, el mensaje de error (`detail`) ahora incluye la
-causa real, no un mensaje genérico — dos bugs que se corrigieron:
+causa real, no un mensaje genérico — tres bugs que se corrigieron:
 
-**Antes**: cualquier error real dentro del bloque de MCP (una API key
-inválida, un problema de red hacia Anthropic, lo que sea) se veía SIEMPRE
-como el mismo mensaje inútil: `"unhandled errors in a TaskGroup (1
-sub-exception)"`. La causa es que `create_connected_server_and_client_session`
-corre el servidor y el cliente MCP dentro de un `anyio.TaskGroup`, y desde
-Python 3.11 cualquier excepción que salga de ese bloque llega envuelta en un
-`ExceptionGroup` — sin desenvolverla, se pierde el mensaje real. `chat.py`
-ahora se desenvuelve recursivamente (`_root_cause`) antes de loguearla y
-devolverla, así que el `detail` del 503 ahora sí dice, por ejemplo,
-`AuthenticationError: ... invalid x-api-key ...` en vez del mensaje genérico.
-Si te vuelve a pasar, el mensaje del error (o los logs de Cloud Run) ya
-apuntan directo a la causa.
+**1. `"unhandled errors in a TaskGroup (1 sub-exception)"` no decía nada.**
+`create_connected_server_and_client_session` corre el servidor y el cliente
+MCP dentro de un `anyio.TaskGroup`, y desde Python 3.11 cualquier excepción
+que salga de ese bloque llega envuelta en un `ExceptionGroup` — sin
+desenvolverla, se pierde el mensaje real. `chat.py` ahora se desenvuelve
+recursivamente (`_root_cause`) antes de loguearla y devolverla en el
+`detail` del 503.
 
-**Además**: antes, si el chat funcionaba bien pero SOLO fallaba el guardado
-en Firestore (por ejemplo, el 403 de permisos de abajo), todo el endpoint
-respondía 503 igual, descartando la respuesta de Claude que sí se había
-generado correctamente. Ahora ese guardado es "best effort": la respuesta se
-entrega siempre que Claude haya respondido, con `history_persisted: false`
-si no se pudo guardar (el frontend muestra un aviso pequeño, no bloqueante).
+**2. La causa real que ese desenvolvimiento reveló: `"'ThinkingBlock' object
+has no attribute 'id'"`.** Al reconstruir a mano el turno del asistente para
+reenviárselo a Claude en cada vuelta del loop de tools, el código asumía que
+la respuesta solo traía bloques `"text"` y `"tool_use"` — pero Claude Sonnet
+5 a veces incluye también un bloque `"thinking"` (razonamiento) junto con el
+`tool_use`, y ese `ThinkingBlock` no tiene atributo `.id` (que sí tienen los
+bloques de tipo `tool_use`). Esto reventaba justo dentro del `async with` de
+la sesión MCP, por eso llegaba envuelto en el `ExceptionGroup` del punto 1 —
+los dos bugs se enmascaraban entre sí. El fix real: en vez de reconstruir
+cada bloque a mano enumerando tipos, `chat.py` ahora usa
+`block.model_dump(exclude_none=True)`, que serializa cualquier tipo de
+bloque (texto, tool_use, thinking, y los que Anthropic agregue después)
+correctamente sin tener que anticiparlos todos. Hay un test de regresión
+específico para esto (`test_run_pokedex_chat_handles_thinking_blocks`).
+
+**3. Un fallo de Firestore tumbaba TODA la respuesta, aunque Claude sí
+hubiera respondido bien.** Antes, si el chat funcionaba pero SOLO fallaba el
+guardado en Firestore (por ejemplo, el 403 de permisos de abajo), el
+endpoint completo respondía 503 igual, descartando la respuesta ya generada.
+Ahora ese guardado es "best effort": la respuesta se entrega siempre que
+Claude haya respondido, con `history_persisted: false` si no se pudo
+guardar (el frontend muestra un aviso pequeño, no bloqueante).
 
 Si ves el error de Firestore específicamente
 (`Firestore no disponible... 403 Missing or insufficient permissions`),

@@ -121,17 +121,28 @@ async def run_pokedex_chat(
                     final_text = "\n".join(text_blocks).strip()
                     break
 
-                # Se re-envía el turno del asistente tal cual (texto + tool_use)
-                # para que Claude mantenga el contexto de qué tool pidió y por qué.
+                # Se re-envía el turno del asistente TAL CUAL (con `model_dump`,
+                # no reconstruido a mano) para que Claude mantenga el contexto
+                # de qué tool pidió y por qué.
+                #
+                # Bug real encontrado en producción: antes se reconstruía cada
+                # bloque a mano asumiendo que solo existían "text" y
+                # "tool_use" — pero Claude Sonnet 5 a veces incluye bloques
+                # "thinking" (razonamiento) en su respuesta, y el `else` de
+                # esa reconstrucción intentaba leer `b.id` de un
+                # `ThinkingBlock`, que no tiene ese atributo
+                # ("'ThinkingBlock' object has no attribute 'id'"). Al
+                # reventar DENTRO del `async with` de la sesión MCP, ese error
+                # llegaba envuelto en el ExceptionGroup de anyio (ver
+                # `_root_cause` arriba) — por eso antes solo se veía el
+                # mensaje genérico de la TaskGroup, nunca la causa real.
+                # `model_dump(exclude_none=True)` serializa cualquier tipo de
+                # bloque (texto, tool_use, thinking, y los que Anthropic
+                # agregue después) sin tener que enumerarlos a mano.
                 messages.append(
                     {
                         "role": "assistant",
-                        "content": [
-                            {"type": "text", "text": b.text}
-                            if b.type == "text"
-                            else {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
-                            for b in response.content
-                        ],
+                        "content": [block.model_dump(exclude_none=True) for block in response.content],
                     }
                 )
 

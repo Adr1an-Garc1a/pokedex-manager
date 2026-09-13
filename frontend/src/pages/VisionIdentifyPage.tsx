@@ -3,15 +3,18 @@ import { addToCollection, listMyCollection } from "@/api/collection";
 import { getErrorMessage } from "@/api/errors";
 import { PokeballSpinner } from "@/components/PokeballSpinner";
 import { TypeBadge } from "@/components/TypeBadge";
+import { useAuth } from "@/context/AuthContext";
 import type { PokemonVisionResult } from "@/types";
+import { loadCachedVisionHistory, saveCachedVisionHistory } from "@/utils/visionHistoryCache";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 /** Se identifica por `entry_id` (o, si aún no tiene, por `image_url`) para
- * poder mezclar sin duplicar el resultado recién identificado (que se
- * muestra al instante, localmente) con lo que ya llegó del historial en el
- * backend — así el historial se ve completo incluso si el guardado en
- * Firestore fallara para esa consulta en particular. */
+ * poder mezclar sin duplicar: lo identificado en esta sesión/dispositivo
+ * (caché local, ver utils/visionHistoryCache.ts) con lo que devuelve el
+ * backend — así el historial se ve completo (y sobrevive a navegar a otra
+ * sección o recargar la página) incluso si el guardado en Firestore fallara
+ * para alguna consulta en particular. */
 function mergeHistory(
   local: PokemonVisionResult[],
   server: PokemonVisionResult[]
@@ -28,11 +31,18 @@ function mergeHistory(
 }
 
 export function VisionIdentifyPage() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [localResults, setLocalResults] = useState<PokemonVisionResult[]>([]);
+
+  // Arranca ya con lo que quedó guardado en localStorage de una visita
+  // anterior — así el historial se ve completo desde el primer render, sin
+  // esperar a que responda el backend.
+  const [cachedResults, setCachedResults] = useState<PokemonVisionResult[]>(() =>
+    user ? loadCachedVisionHistory(user.id) : []
+  );
 
   const { data: myCollection } = useQuery({
     queryKey: ["collection", "ids-only"],
@@ -45,10 +55,27 @@ export function VisionIdentifyPage() {
     queryFn: getVisionHistory,
   });
 
+  // Cuando llega (o cambia) el historial del backend, se fusiona con el
+  // caché local y se vuelve a guardar en localStorage — así el caché se
+  // "autocura" con lo que Firestore sí pudo confirmar, sin perder nunca lo
+  // que ya se había identificado en este dispositivo.
+  useEffect(() => {
+    if (!user || !serverHistory) return;
+    setCachedResults((prev) => {
+      const merged = mergeHistory(prev, serverHistory);
+      saveCachedVisionHistory(user.id, merged);
+      return merged;
+    });
+  }, [serverHistory, user]);
+
   const identifyMutation = useMutation({
     mutationFn: identifyPokemonImage,
     onSuccess: (data) => {
-      setLocalResults((prev) => [data, ...prev]);
+      setCachedResults((prev) => {
+        const merged = mergeHistory([data], prev);
+        if (user) saveCachedVisionHistory(user.id, merged);
+        return merged;
+      });
       queryClient.invalidateQueries({ queryKey: ["ai", "vision-history"] });
     },
   });
@@ -77,7 +104,7 @@ export function VisionIdentifyPage() {
     ? ownedIds.has(result.matched_pokemon_id)
     : false;
 
-  const rows = mergeHistory(localResults, serverHistory ?? []);
+  const rows = cachedResults;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">

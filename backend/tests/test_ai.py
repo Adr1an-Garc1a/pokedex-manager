@@ -258,12 +258,34 @@ class _FakeTextBlock:
     def __init__(self, text: str):
         self.text = text
 
+    def model_dump(self, *, exclude_none=False):
+        return {"type": "text", "text": self.text}
+
 
 class _FakeToolUseBlock:
     type = "tool_use"
 
     def __init__(self, id: str, name: str, input: dict):
         self.id, self.name, self.input = id, name, input
+
+    def model_dump(self, *, exclude_none=False):
+        return {"type": "tool_use", "id": self.id, "name": self.name, "input": self.input}
+
+
+class _FakeThinkingBlock:
+    """Reproduce el bug real: Claude Sonnet 5 a veces incluye bloques de
+    razonamiento junto con el tool_use — un ThinkingBlock real no tiene
+    atributo `.id`, así que reconstruir el turno del asistente asumiendo
+    solo "text"/"tool_use" reventaba con
+    "'ThinkingBlock' object has no attribute 'id'"."""
+
+    type = "thinking"
+
+    def __init__(self, thinking: str, signature: str = "fake-signature"):
+        self.thinking, self.signature = thinking, signature
+
+    def model_dump(self, *, exclude_none=False):
+        return {"type": "thinking", "thinking": self.thinking, "signature": self.signature}
 
 
 class _FakeAnthropicMessages:
@@ -360,6 +382,62 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
     # Confirma que el loop de tool_use en chat.py llamó a Claude exactamente dos
     # veces (tool_use -> ejecuta la tool MCP -> le manda el resultado -> texto final).
     assert len(_FakeAsyncAnthropic.last_instance.messages.create_calls) == 2
+
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_run_pokedex_chat_handles_thinking_blocks(monkeypatch):
+    """Regresión del bug real reportado en producción: la respuesta de Claude
+    Sonnet 5 traía un bloque `thinking` junto al `tool_use`, y reconstruir el
+    turno del asistente a mano (asumiendo solo texto/tool_use) reventaba con
+    "'ThinkingBlock' object has no attribute 'id'" — envuelto además en el
+    ExceptionGroup de la sesión MCP, así que antes solo se veía el mensaje
+    genérico de la TaskGroup."""
+    from app.db.session import SessionLocal
+    from app.models.collection import CollectionEntry
+    from app.models.user import User
+
+    db = SessionLocal()
+    user = User(google_sub="sub-chat-thinking", email="thinking@example.com", name="Pensador")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    db.add(
+        CollectionEntry(user_id=user.id, pokemon_id=25, pokemon_name="pikachu", types=["electric"])
+    )
+    db.commit()
+
+    _FakeAsyncAnthropic._shared_responses = [
+        _FakeMessage(
+            content=[
+                _FakeThinkingBlock("Voy a revisar la colección del usuario primero..."),
+                _FakeToolUseBlock(id="tool-1", name="get_collection_stats", input={}),
+            ]
+        ),
+        _FakeMessage(content=[_FakeTextBlock("Tienes 1 Pokémon en tu colección.")]),
+    ]
+    monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
+    monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
+
+    async def fake_get_conversation(user_id):
+        return []
+
+    async def fake_append_turn(user_id, *, user_message, assistant_reply):
+        return [
+            {"role": "user", "content": user_message, "ts": "now"},
+            {"role": "assistant", "content": assistant_reply, "ts": "now"},
+        ]
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
+
+    reply, history, persisted = await chat_module.run_pokedex_chat(
+        db=db, user=user, user_message="¿cuántos pokémon tengo?"
+    )
+
+    assert "1 Pokémon" in reply
+    assert persisted is True
 
     db.close()
 
