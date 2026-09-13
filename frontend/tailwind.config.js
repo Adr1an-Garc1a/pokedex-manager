@@ -15,6 +15,8 @@ export default {
           "teal-dark": "#3FB39B",
           sun: "#FFE08A",     // acento cálido (fichas/estrellas favorito)
           coral: "#FFB4A2",   // errores / alertas suaves
+          orange: "#FFD8A8",    // naranja pastel — resalta en Insights los Pokémon del equipo ideal que el usuario aún no tiene
+          "orange-dark": "#E8A85C",
           ink: "#31465F",     // texto principal
           "ink-soft": "#6B84A0",
         },

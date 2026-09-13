@@ -9,6 +9,7 @@ export function PokedexChatPage() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
   const [localHistory, setLocalHistory] = useState<ChatMessage[] | null>(null);
+  const [lastPersistWarning, setLastPersistWarning] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: history, isLoading } = useQuery({
@@ -20,13 +21,17 @@ export function PokedexChatPage() {
 
   const sendMutation = useMutation({
     mutationFn: sendChatMessage,
-    onSuccess: (response) => setLocalHistory(response.history),
+    onSuccess: (response) => {
+      setLocalHistory(response.history);
+      setLastPersistWarning(!response.history_persisted);
+    },
   });
 
   const resetMutation = useMutation({
     mutationFn: resetChatHistory,
     onSuccess: () => {
       setLocalHistory([]);
+      setLastPersistWarning(false);
       queryClient.invalidateQueries({ queryKey: ["ai", "chat-history"] });
     },
   });
@@ -96,6 +101,13 @@ export function PokedexChatPage() {
 
       {sendMutation.isError && (
         <p className="mt-2 text-sm text-poke-coral">{getErrorMessage(sendMutation.error)}</p>
+      )}
+
+      {lastPersistWarning && !sendMutation.isPending && (
+        <p className="mt-2 text-xs text-poke-ink-soft">
+          ⚠️ Claude respondió, pero no se pudo guardar este mensaje en tu historial (problema
+          temporal con el almacenamiento) — puedes seguir chateando normalmente.
+        </p>
       )}
 
       <form onSubmit={handleSubmit} className="mt-4 flex gap-2">

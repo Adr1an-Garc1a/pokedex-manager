@@ -19,6 +19,11 @@ export async function identifyPokemonImage(file: File): Promise<PokemonVisionRes
   return data;
 }
 
+export async function getVisionHistory(): Promise<PokemonVisionResult[]> {
+  const { data } = await apiClient.get<PokemonVisionResult[]>("/ai/vision/history");
+  return data;
+}
+
 // --- 2. Chat MCP con Claude Sonnet 5 ---------------------------------------
 
 export async function getChatHistory(): Promise<ChatMessage[]> {

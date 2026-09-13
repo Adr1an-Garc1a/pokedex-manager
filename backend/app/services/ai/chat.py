@@ -20,6 +20,7 @@ Flujo por cada mensaje del usuario:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from anthropic import AsyncAnthropic
 from fastapi import HTTPException
@@ -47,6 +48,25 @@ _SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
+def _root_cause(exc: BaseException) -> BaseException:
+    """`create_connected_server_and_client_session` corre el servidor MCP y el
+    cliente dentro de un `anyio.TaskGroup` — desde Python 3.11, CUALQUIER
+    excepción que salga del bloque `async with ... as session:` (una API key
+    inválida, un timeout de red hacia Anthropic, lo que sea) llega envuelta
+    en un `ExceptionGroup("unhandled errors in a TaskGroup", [la_real])`.
+
+    Sin desenvolverla, el mensaje que ve el usuario es siempre el mismo,
+    genérico e inútil: "unhandled errors in a TaskGroup (1 sub-exception)" —
+    sin importar cuál sea la causa real. Esta función se desenvuelve
+    recursivamente hasta encontrar la excepción real de más adentro, para
+    poder loguearla y devolverla en el detalle del error.
+    """
+    seen = exc
+    while isinstance(seen, BaseExceptionGroup) and seen.exceptions:
+        seen = seen.exceptions[0]
+    return seen
+
+
 def _tool_result_to_text(result) -> str:
     parts = []
     for block in result.content:
@@ -56,7 +76,9 @@ def _tool_result_to_text(result) -> str:
     return "\n".join(parts) if parts else "(sin contenido)"
 
 
-async def run_pokedex_chat(*, db: Session, user: User, user_message: str) -> tuple[str, list[dict]]:
+async def run_pokedex_chat(
+    *, db: Session, user: User, user_message: str
+) -> tuple[str, list[dict], bool]:
     history = await get_conversation(user.id)
     recent_history = history[-_MAX_HISTORY_MESSAGES:]
 
@@ -133,17 +155,40 @@ async def run_pokedex_chat(*, db: Session, user: User, user_message: str) -> tup
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Fallo en el chat MCP con Claude Sonnet 5")
+        root = _root_cause(exc)
+        logger.exception(
+            "Fallo en el chat MCP con Claude Sonnet 5 (causa real desenvuelta: %r)", root
+        )
         raise HTTPException(
             status_code=503,
             detail=(
                 "El chat con IA no está disponible ahora mismo. Verifica que "
-                f"ANTHROPIC_API_KEY sea válida. Detalle técnico: {exc}"
+                f"ANTHROPIC_API_KEY sea válida. Detalle técnico: {root}"
             ),
         ) from exc
 
     if not final_text:
         final_text = "No obtuve una respuesta del modelo, intenta de nuevo."
 
-    updated_history = await append_turn(user.id, user_message=user_message, assistant_reply=final_text)
-    return final_text, updated_history
+    # Guardar el turno en Firestore es "best effort" desde la perspectiva del
+    # usuario: si falla (permisos, Firestore no disponible, etc.), Claude ya
+    # respondió correctamente y esa respuesta se le entrega igual — solo no
+    # queda guardada para la próxima vez. Antes, un fallo acá tumbaba TODA la
+    # respuesta con un 503 aunque el chat sí hubiera funcionado.
+    try:
+        updated_history = await append_turn(
+            user.id, user_message=user_message, assistant_reply=final_text
+        )
+        persisted = True
+    except HTTPException as exc:
+        logger.warning(
+            "El chat funcionó pero no se pudo guardar el turno en Firestore: %s", exc.detail
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        updated_history = history + [
+            {"role": "user", "content": user_message, "ts": now},
+            {"role": "assistant", "content": final_text, "ts": now},
+        ]
+        persisted = False
+
+    return final_text, updated_history, persisted

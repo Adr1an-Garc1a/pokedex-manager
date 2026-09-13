@@ -1,8 +1,9 @@
-import { identifyPokemonImage } from "@/api/ai";
+import { getVisionHistory, identifyPokemonImage } from "@/api/ai";
 import { addToCollection, listMyCollection } from "@/api/collection";
 import { getErrorMessage } from "@/api/errors";
 import { PokeballSpinner } from "@/components/PokeballSpinner";
 import { TypeBadge } from "@/components/TypeBadge";
+import type { PokemonVisionResult } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type ChangeEvent } from "react";
 
@@ -18,7 +19,15 @@ export function VisionIdentifyPage() {
   });
   const ownedIds = new Set((myCollection ?? []).map((entry) => entry.pokemon_id));
 
-  const identifyMutation = useMutation({ mutationFn: identifyPokemonImage });
+  const { data: history, isLoading: historyLoading } = useQuery({
+    queryKey: ["ai", "vision-history"],
+    queryFn: getVisionHistory,
+  });
+
+  const identifyMutation = useMutation({
+    mutationFn: identifyPokemonImage,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ai", "vision-history"] }),
+  });
 
   const addMutation = useMutation({
     mutationFn: (pokemonId: number) => addToCollection({ pokemon_id: pokemonId }),
@@ -44,8 +53,13 @@ export function VisionIdentifyPage() {
     ? ownedIds.has(result.matched_pokemon_id)
     : false;
 
+  // La consulta recién hecha ya viene incluida en `history` (se invalida la
+  // query al identificar), así que la tabla se arma solo con el historial —
+  // evita mostrar el mismo resultado duplicado dos veces.
+  const rows: PokemonVisionResult[] = history ?? [];
+
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
+    <div className="mx-auto max-w-5xl px-4 py-8">
       <div className="mb-6 text-center">
         <h1 className="font-display text-3xl font-extrabold">
           ¿No sabes qué Pokémon tienes? 📸
@@ -103,66 +117,11 @@ export function VisionIdentifyPage() {
       </div>
 
       {result && (
-        <div className="poke-card mt-6 flex flex-col gap-4 p-6">
-          <div className="flex items-center gap-4">
-            {result.sprite_url && (
-              <img
-                src={result.sprite_url}
-                alt={result.pokemon_name}
-                className="h-20 w-20 rounded-full bg-poke-mist object-contain [image-rendering:pixelated]"
-              />
-            )}
-            <div>
-              <h2 className="font-display text-2xl font-bold capitalize">
-                {result.pokemon_name}
-              </h2>
-              <p className="text-xs uppercase tracking-wide text-poke-ink-soft">
-                Confianza del modelo: {result.confidence}
-              </p>
-            </div>
-          </div>
-
-          {result.types.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {result.types.map((t) => (
-                <TypeBadge key={t} type={t} />
-              ))}
-            </div>
-          )}
-
-          <p className="text-poke-ink">{result.description}</p>
-          <p className="rounded-xl2 bg-poke-mist/60 p-3 text-sm italic text-poke-ink-soft">
-            💡 {result.fun_fact}
-          </p>
-
-          {(result.strong_against.length > 0 || result.weak_against.length > 0) && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {result.strong_against.length > 0 && (
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-poke-ink-soft">Fuerte contra</p>
-                  <div className="flex flex-wrap gap-1">
-                    {result.strong_against.map((t) => (
-                      <TypeBadge key={t} type={t} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {result.weak_against.length > 0 && (
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-poke-ink-soft">Débil contra</p>
-                  <div className="flex flex-wrap gap-1">
-                    {result.weak_against.map((t) => (
-                      <TypeBadge key={t} type={t} />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
+        <div className="poke-card mt-6 flex flex-col gap-3 p-6">
+          <h2 className="font-display text-xl font-bold">✅ ¡Listo! Esto encontré:</h2>
           {result.matched_pokemon_id ? (
             <button
-              className="poke-btn-primary"
+              className="poke-btn-primary self-start"
               disabled={alreadyOwned || addMutation.isPending}
               onClick={() => addMutation.mutate(result.matched_pokemon_id!)}
             >
@@ -170,17 +129,94 @@ export function VisionIdentifyPage() {
                 ? "Ya está en tu colección"
                 : addMutation.isPending
                 ? "Agregando..."
-                : "Agregar a mi colección"}
+                : `Agregar ${result.pokemon_name} a mi colección`}
             </button>
           ) : (
             <p className="text-sm text-poke-ink-soft">
               No se pudo confirmar este Pokémon contra la Pokédex oficial, así que no se puede
-              agregar directamente a tu colección — pero la identificación de arriba es la del
+              agregar directamente a tu colección — pero la identificación de abajo es la del
               modelo de todas formas.
             </p>
           )}
         </div>
       )}
+
+      <div className="mt-8">
+        <h2 className="mb-3 font-display text-xl font-bold">🕓 Historial de identificaciones</h2>
+        {historyLoading ? (
+          <PokeballSpinner label="Cargando tu historial..." />
+        ) : rows.length === 0 ? (
+          <p className="poke-card p-4 text-center text-sm text-poke-ink-soft">
+            Todavía no has identificado ningún Pokémon — sube una foto arriba para empezar.
+          </p>
+        ) : (
+          <VisionHistoryTable rows={rows} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VisionHistoryTable({ rows }: { rows: PokemonVisionResult[] }) {
+  return (
+    <div className="poke-card overflow-x-auto p-2">
+      <table className="w-full min-w-[820px] border-collapse text-left text-sm">
+        <thead>
+          <tr className="border-b-2 border-poke-mist text-xs uppercase tracking-wide text-poke-ink-soft">
+            <th className="p-3">Foto</th>
+            <th className="p-3">Nombre del Pokémon</th>
+            <th className="p-3">Tipo</th>
+            <th className="p-3">Descripción</th>
+            <th className="p-3">Juego de primera aparición</th>
+            <th className="p-3">Zonas donde es fácil encontrarlo</th>
+            <th className="p-3">Fuerte contra</th>
+            <th className="p-3">Débil contra</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.entry_id ?? row.image_url} className="border-b border-poke-mist/70 align-top">
+              <td className="p-3">
+                <img
+                  src={row.sprite_url ?? row.image_url}
+                  alt={row.pokemon_name}
+                  className="h-14 w-14 rounded-xl bg-poke-mist object-contain [image-rendering:pixelated]"
+                />
+              </td>
+              <td className="p-3">
+                <p className="font-display font-bold capitalize">{row.pokemon_name}</p>
+                <p className="text-xs text-poke-ink-soft">Confianza: {row.confidence}</p>
+              </td>
+              <td className="p-3">
+                <div className="flex flex-wrap gap-1">
+                  {row.types.length > 0 ? (
+                    row.types.map((t) => <TypeBadge key={t} type={t} />)
+                  ) : (
+                    <span className="text-xs text-poke-ink-soft">—</span>
+                  )}
+                </div>
+              </td>
+              <td className="p-3 max-w-[220px] text-poke-ink">{row.description}</td>
+              <td className="p-3 max-w-[180px] text-poke-ink">{row.first_appearance_game}</td>
+              <td className="p-3 max-w-[180px] text-poke-ink">{row.habitat_zones}</td>
+              <td className="p-3">
+                <div className="flex flex-wrap gap-1">
+                  {row.strong_against.map((t, i) => (
+                    <TypeBadge key={t} type={t} label={row.strong_against_es[i] ?? t} />
+                  ))}
+                </div>
+              </td>
+              <td className="p-3">
+                <div className="flex flex-wrap gap-1">
+                  {row.weak_against.map((t, i) => (
+                    <TypeBadge key={t} type={t} label={row.weak_against_es[i] ?? t} />
+                  ))}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

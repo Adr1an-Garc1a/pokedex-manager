@@ -91,3 +91,50 @@ async def reset_conversation(user_id: int) -> None:
         await client.collection(_COLLECTION).document(str(user_id)).delete()
     except Exception:
         logger.warning("No se pudo borrar el historial de chat en Firestore", exc_info=True)
+
+
+# --- Historial de Vision (bonus 1) -----------------------------------------
+#
+# Mismo patrón/razonamiento que mcp_conversations arriba: una colección
+# `vision_history`, un documento por usuario, con el array completo de
+# consultas pasadas (incluida la imagen que subió cada vez). A diferencia del
+# chat, guardar el historial de Vision es "best effort": si Firestore falla,
+# la identificación ya se hizo y de todos modos se le muestra al usuario —
+# solo no queda guardada para verla después. Por eso estas funciones nunca
+# lanzan HTTPException.
+
+_VISION_COLLECTION = "vision_history"
+_MAX_VISION_HISTORY = 50  # se recorta a las últimas N consultas por usuario
+
+
+async def get_vision_history(user_id: int) -> list[dict]:
+    """Más reciente primero. Vacío si el usuario nunca ha usado Vision o si
+    Firestore no está disponible en este entorno."""
+    try:
+        client = _get_client()
+        doc = await client.collection(_VISION_COLLECTION).document(str(user_id)).get()
+    except Exception:
+        logger.warning("No se pudo leer el historial de Vision desde Firestore", exc_info=True)
+        return []
+
+    if not doc.exists:
+        return []
+    entries = doc.to_dict().get("entries", [])
+    return list(reversed(entries))
+
+
+async def append_vision_entry(user_id: int, entry: dict) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        client = _get_client()
+        doc_ref = client.collection(_VISION_COLLECTION).document(str(user_id))
+        snapshot = await doc_ref.get()
+        entries = snapshot.to_dict().get("entries", []) if snapshot.exists else []
+        entries.append(entry)
+        entries = entries[-_MAX_VISION_HISTORY:]
+        await doc_ref.set({"entries": entries, "updated_at": now})
+    except Exception:
+        # Deliberadamente silencioso (a diferencia de append_turn del chat):
+        # la identificación ya se le mostró al usuario, perder el guardado en
+        # el historial es un problema menor, no debe tumbar la respuesta.
+        logger.warning("No se pudo guardar la consulta de Vision en el historial", exc_info=True)

@@ -7,7 +7,11 @@ const TYPE_COLORS: Record<string, string> = {
   dark: "bg-type-dark", steel: "bg-type-steel", fairy: "bg-type-fairy",
 };
 
-export function TypeBadge({ type }: { type: string }) {
+/** `type` (slug en inglés, ej. "water") decide siempre el color — es la
+ * clave que existe en TYPE_COLORS. `label`, si se pasa, es el texto que se
+ * muestra en vez del propio `type` (ej. para mostrar "agua" en español sin
+ * perder el color asociado a "water"). */
+export function TypeBadge({ type, label }: { type: string; label?: string }) {
   const colorClass = TYPE_COLORS[type] ?? "bg-poke-mist";
-  return <span className={`type-badge ${colorClass}`}>{type}</span>;
+  return <span className={`type-badge ${colorClass}`}>{label ?? type}</span>;
 }

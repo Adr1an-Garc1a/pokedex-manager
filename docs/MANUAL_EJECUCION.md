@@ -54,7 +54,7 @@ pip install -r requirements.txt
 pytest -q
 ```
 
-Deberías ver `8 passed` (incluye los tests nuevos de login/registro).
+Deberías ver `18 passed` (incluye login/registro, colección, y las 3 funcionalidades bonus de IA).
 
 ## 2. Actualizar tu despliegue en GCP ya existente (manual, una vez más)
 

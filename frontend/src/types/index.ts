@@ -78,16 +78,21 @@ export interface CollectionStats {
 // --- Funcionalidades bonus de IA -----------------------------------------
 
 export interface PokemonVisionResult {
+  entry_id: string | null;
+  created_at: string | null;
   image_url: string;
   pokemon_name: string;
   description: string;
-  fun_fact: string;
   confidence: string;
+  first_appearance_game: string;
+  habitat_zones: string;
   matched_pokemon_id: number | null;
   sprite_url: string | null;
   types: string[];
   strong_against: string[];
   weak_against: string[];
+  strong_against_es: string[];
+  weak_against_es: string[];
 }
 
 export interface ChatMessage {
@@ -99,28 +104,41 @@ export interface ChatMessage {
 export interface ChatResponse {
   reply: string;
   history: ChatMessage[];
+  history_persisted: boolean;
+}
+
+export interface AlternativeSuggestion {
+  pokemon_name: string;
+  reason: string;
+  sprite_url: string | null;
 }
 
 export interface TeamRecommendation {
   pokemon_name: string;
   reason: string;
   already_in_collection: boolean;
+  sprite_url: string | null;
+  alternatives: AlternativeSuggestion[];
 }
 
 export interface FunFactEntry {
   pokemon_name: string;
   fact: string;
+  sprite_url: string | null;
 }
 
-export interface SuggestedAddition {
+export interface AnalyzedTeamMember {
   pokemon_name: string;
-  reason: string;
+  sprite_url: string | null;
+  types: string[];
 }
 
 export interface CollectionInsights {
+  analyzed_team: AnalyzedTeamMember[];
+  team_score: number;
+  team_score_reason: string;
   ideal_team: TeamRecommendation[];
   strengths: string[];
   weaknesses: string[];
   fun_facts: FunFactEntry[];
-  suggested_additions: SuggestedAddition[];
 }

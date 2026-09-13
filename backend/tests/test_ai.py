@@ -17,6 +17,7 @@ from app.api.v1 import auth as auth_module
 from app.schemas.pokemon import PokemonDetail, PokemonStat
 from app.services import pokeapi_client as pokeapi_client_module
 from app.services.ai import chat as chat_module
+from app.services.ai import vision as vision_module
 
 
 class _FakeGoogleUser:
@@ -42,6 +43,24 @@ def _reset_pokeapi_singleton():
     pokeapi_client_module._client_singleton = None
 
 
+@pytest.fixture(autouse=True)
+def _fake_vision_history(monkeypatch):
+    """Ninguno de los tests de este archivo necesita Firestore real — se
+    reemplaza por un dict en memoria compartido entre append/get, así los
+    tests son deterministas y no dependen de credenciales de GCP."""
+    store: dict[int, list[dict]] = {}
+
+    async def fake_append(user_id, entry):
+        store.setdefault(user_id, []).append(entry)
+
+    async def fake_get(user_id):
+        return list(reversed(store.get(user_id, [])))
+
+    monkeypatch.setattr(vision_module, "append_vision_entry", fake_append)
+    monkeypatch.setattr(ai_module, "get_vision_history", fake_get)
+    return store
+
+
 def _fake_pikachu() -> PokemonDetail:
     return PokemonDetail(
         id=25,
@@ -54,6 +73,15 @@ def _fake_pikachu() -> PokemonDetail:
         abilities=["static"],
         stats=[PokemonStat(name="hp", base_stat=35)],
     )
+
+
+async def _fake_species_info(self, id_or_name):
+    return {
+        "generation": "generation-i",
+        "first_appearance_game": "Pokémon Rojo, Azul y Amarillo",
+        "habitat": "forest",
+        "habitat_zones": "bosques",
+    }
 
 
 # --- 1. Vision -------------------------------------------------------------
@@ -79,7 +107,7 @@ def test_vision_identify_rejects_unsupported_file_type(client, monkeypatch):
     assert response.status_code == 422
 
 
-def test_vision_identify_resolves_against_pokeapi(client, monkeypatch):
+def test_vision_identify_resolves_against_pokeapi_and_translates_types(client, monkeypatch):
     token = _register_and_get_token(
         client, monkeypatch, sub="sub-vision-2", email="vision2@example.com", name="Vision Dos"
     )
@@ -88,7 +116,8 @@ def test_vision_identify_resolves_against_pokeapi(client, monkeypatch):
         return {
             "pokemon_name": "pikachu",
             "description": "Un ratón eléctrico amarillo.",
-            "fun_fact": "Puede generar hasta 100.000 voltios.",
+            "first_appearance_game": "estimado del modelo (se sobreescribe)",
+            "habitat_zones": "estimado del modelo (se sobreescribe)",
             "confidence": "alta",
         }
 
@@ -108,6 +137,9 @@ def test_vision_identify_resolves_against_pokeapi(client, monkeypatch):
     monkeypatch.setattr(
         pokeapi_client_module.PokeAPIClient, "get_type_matchups", fake_get_type_matchups
     )
+    monkeypatch.setattr(
+        pokeapi_client_module.PokeAPIClient, "get_species_info", _fake_species_info
+    )
 
     class _FakeStorage:
         async def save_image(self, file, *, subfolder):
@@ -123,12 +155,37 @@ def test_vision_identify_resolves_against_pokeapi(client, monkeypatch):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["pokemon_name"] == "pikachu"
-    assert body["fun_fact"]
     assert body["matched_pokemon_id"] == 25
     assert body["types"] == ["electric"]
     assert body["strong_against"] == ["water", "flying"]
     assert body["weak_against"] == ["ground"]
+    assert body["strong_against_es"] == ["agua", "volador"]
+    assert body["weak_against_es"] == ["tierra"]
+    assert body["first_appearance_game"] == "Pokémon Rojo, Azul y Amarillo"
+    assert body["habitat_zones"] == "bosques"
     assert body["image_url"].startswith("https://fake-storage.example.com/")
+    assert body["entry_id"]
+    assert body["created_at"]
+
+    # Y quedó guardada en el historial (más reciente primero).
+    history_response = client.get(
+        "/api/v1/ai/vision/history", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert history_response.status_code == 200, history_response.text
+    history_body = history_response.json()
+    assert len(history_body) == 1
+    assert history_body[0]["pokemon_name"] == "pikachu"
+
+
+def test_vision_history_empty_for_new_user(client, monkeypatch):
+    token = _register_and_get_token(
+        client, monkeypatch, sub="sub-vision-3", email="vision3@example.com", name="Vision Tres"
+    )
+    response = client.get(
+        "/api/v1/ai/vision/history", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 # --- 2. Chat MCP -------------------------------------------------------------
@@ -248,17 +305,72 @@ async def test_run_pokedex_chat_calls_mcp_tool_and_persists_history(monkeypatch)
     monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
     monkeypatch.setattr(chat_module, "append_turn", fake_append_turn)
 
-    reply, history = await chat_module.run_pokedex_chat(
+    reply, history, persisted = await chat_module.run_pokedex_chat(
         db=db, user=user, user_message="¿cuántos pokémon tengo?"
     )
 
     assert "1 Pokémon" in reply
     assert history == saved_histories[0]
+    assert persisted is True
     # Confirma que el loop de tool_use en chat.py llamó a Claude exactamente dos
     # veces (tool_use -> ejecuta la tool MCP -> le manda el resultado -> texto final).
     assert len(_FakeAsyncAnthropic.last_instance.messages.create_calls) == 2
 
     db.close()
+
+
+@pytest.mark.asyncio
+async def test_run_pokedex_chat_survives_firestore_write_failure(monkeypatch):
+    """Si Claude respondió bien pero Firestore no pudo guardar el turno (el
+    bug reportado: 403 de permisos), el chat debe seguir funcionando — nunca
+    tirar toda la respuesta por un fallo de persistencia."""
+    from app.db.session import SessionLocal
+    from app.models.user import User
+    from fastapi import HTTPException
+
+    db = SessionLocal()
+    user = User(google_sub="sub-chat-resiliente", email="resiliente@example.com", name="R")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _FakeAsyncAnthropic._shared_responses = [
+        _FakeMessage(content=[_FakeTextBlock("¡Hola! Todo bien por acá.")]),
+    ]
+    monkeypatch.setattr(chat_module, "AsyncAnthropic", _FakeAsyncAnthropic)
+    monkeypatch.setattr(chat_module.settings, "anthropic_api_key", "fake-key-de-prueba")
+
+    async def fake_get_conversation(user_id):
+        return []
+
+    async def fake_append_turn_fails(user_id, *, user_message, assistant_reply):
+        raise HTTPException(status_code=503, detail="Firestore no disponible: 403 permisos")
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "append_turn", fake_append_turn_fails)
+
+    reply, history, persisted = await chat_module.run_pokedex_chat(
+        db=db, user=user, user_message="hola"
+    )
+
+    assert reply == "¡Hola! Todo bien por acá."
+    assert persisted is False
+    assert history[-1]["content"] == reply
+    assert history[-2]["content"] == "hola"
+
+    db.close()
+
+
+def test_root_cause_unwraps_task_group_exception_group():
+    """El fix principal: sin esto, cualquier error real (API key inválida,
+    fallo de red hacia Anthropic, etc.) dentro del `async with` de MCP se ve
+    siempre como el mismo mensaje inútil de anyio. Se debe poder recuperar la
+    excepción real de adentro."""
+    real_error = ValueError("api key inválida de mentiras")
+    wrapped = ExceptionGroup("unhandled errors in a TaskGroup", [real_error])
+    assert chat_module._root_cause(wrapped) is real_error
+    # Y una excepción normal (no agrupada) se devuelve tal cual.
+    assert chat_module._root_cause(real_error) is real_error
 
 
 # --- 3. Insights -------------------------------------------------------------
@@ -272,13 +384,37 @@ def test_insights_requires_at_least_one_pokemon(client, monkeypatch):
     assert response.status_code == 422
 
 
-def test_insights_returns_structured_result(client, monkeypatch):
+def _fake_insights_payload():
+    return {
+        "team_score": 7,
+        "team_score_reason": "Buena cobertura ofensiva pero le falta defensa contra tierra.",
+        "ideal_team": [
+            {
+                "pokemon_name": "pikachu",
+                "reason": "Ya lo tienes y es versátil",
+                "already_in_collection": True,
+                "alternatives": [
+                    {"pokemon_name": "raichu", "reason": "Evolución con más ataque especial"}
+                ],
+            },
+            {
+                "pokemon_name": "garchomp",
+                "reason": "Cubre tu debilidad a tipo tierra",
+                "already_in_collection": False,
+                "alternatives": [
+                    {"pokemon_name": "excadrill", "reason": "Alternativa más rápida"}
+                ],
+            },
+        ],
+        "strengths": ["Pikachu te da buen ataque especial eléctrico"],
+        "weaknesses": ["Sin cobertura contra tipo tierra"],
+        "fun_facts": [{"pokemon_name": "pikachu", "fact": "Es la mascota de la franquicia"}],
+    }
+
+
+def test_insights_returns_structured_result_limited_to_first_six(client, monkeypatch):
     token = _register_and_get_token(
         client, monkeypatch, sub="sub-insights-2", email="insights2@example.com", name="Insights Dos"
-    )
-    # Agrega un Pokémon a la colección para poder pedir insights.
-    monkeypatch.setattr(
-        pokeapi_client_module.PokeAPIClient, "get_pokemon", lambda self, x: _fake_pikachu()
     )
 
     async def fake_get_pokemon(self, id_or_name):
@@ -294,15 +430,11 @@ def test_insights_returns_structured_result(client, monkeypatch):
     assert add_response.status_code == 201, add_response.text
 
     async def fake_generate_structured_json(*, parts, response_schema, system_instruction):
-        return {
-            "ideal_team": [
-                {"pokemon_name": "pikachu", "reason": "Ya lo tienes y es versátil", "already_in_collection": True}
-            ],
-            "strengths": ["Buen ataque especial eléctrico"],
-            "weaknesses": ["Sin cobertura contra tipo tierra"],
-            "fun_facts": [{"pokemon_name": "pikachu", "fact": "Es la mascota de la franquicia"}],
-            "suggested_additions": [{"pokemon_name": "garchomp", "reason": "Cubre la debilidad a tierra"}],
-        }
+        # El resumen de la colección (primeros 6) va en el prompt del último
+        # `Part` de texto — se confirma que la restricción a 6 ya se hizo
+        # antes de llegar aquí (esta función solo recibe lo que le pasan).
+        assert "pikachu" in parts[0].text
+        return _fake_insights_payload()
 
     monkeypatch.setattr(
         "app.services.ai.insights.generate_structured_json", fake_generate_structured_json
@@ -311,5 +443,10 @@ def test_insights_returns_structured_result(client, monkeypatch):
     response = client.get("/api/v1/ai/insights", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200, response.text
     body = response.json()
+    assert body["team_score"] == 7
+    assert body["analyzed_team"][0]["pokemon_name"] == "pikachu"
+    assert body["analyzed_team"][0]["sprite_url"] == "https://example.com/25.png"
     assert body["ideal_team"][0]["pokemon_name"] == "pikachu"
-    assert body["suggested_additions"][0]["pokemon_name"] == "garchomp"
+    assert body["ideal_team"][0]["sprite_url"] == "https://example.com/25.png"
+    assert body["ideal_team"][1]["already_in_collection"] is False
+    assert body["ideal_team"][1]["alternatives"][0]["pokemon_name"] == "excadrill"

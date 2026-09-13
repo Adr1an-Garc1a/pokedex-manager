@@ -1,9 +1,10 @@
 """Rutas de las funcionalidades bonus de IA:
   1. POST /ai/vision/identify   — identificar un Pokémon por foto (Gemini)
-  2. POST /ai/chat              — chat MCP sobre tu colección (Claude Sonnet 5)
-  3. GET  /ai/chat/history      — recuperar el historial de chat
-  4. DELETE /ai/chat/history    — reiniciar la conversación
-  5. GET  /ai/insights          — análisis inteligente de tu colección (Gemini)
+  2. GET  /ai/vision/history    — historial de identificaciones pasadas (con imagen)
+  3. POST /ai/chat              — chat MCP sobre tu colección (Claude Sonnet 5)
+  4. GET  /ai/chat/history      — recuperar el historial de chat
+  5. DELETE /ai/chat/history    — reiniciar la conversación
+  6. GET  /ai/insights          — análisis inteligente de tu colección (Gemini)
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from app.schemas.ai import ChatRequest, ChatResponse, CollectionInsights, Pokemo
 from app.services.ai.chat import run_pokedex_chat
 from app.services.ai.insights import generate_collection_insights
 from app.services.ai.vision import identify_pokemon_from_image
-from app.services.firestore_client import get_conversation, reset_conversation
+from app.services.firestore_client import get_conversation, get_vision_history, reset_conversation
 from app.services.storage import get_storage_service
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -45,8 +46,18 @@ async def vision_identify(
     image_url = await storage.save_image(file, subfolder=f"vision/{current_user.id}")
 
     return await identify_pokemon_from_image(
-        image_bytes=content, mime_type=file.content_type, image_url=image_url
+        image_bytes=content,
+        mime_type=file.content_type,
+        image_url=image_url,
+        user_id=current_user.id,
     )
+
+
+@router.get("/vision/history", response_model=list[PokemonVisionResult])
+async def vision_history(current_user: User = Depends(get_current_user)):
+    """Historial de consultas pasadas del usuario (más reciente primero),
+    incluida la imagen que subió cada vez."""
+    return await get_vision_history(current_user.id)
 
 
 @router.get("/chat/history", response_model=list[dict])
@@ -73,10 +84,10 @@ async def chat(
                 "Ver docs/BONUS_FEATURES.md."
             ),
         )
-    reply, history = await run_pokedex_chat(
+    reply, history, persisted = await run_pokedex_chat(
         db=db, user=current_user, user_message=payload.message
     )
-    return ChatResponse(reply=reply, history=history)
+    return ChatResponse(reply=reply, history=history, history_persisted=persisted)
 
 
 @router.get("/insights", response_model=CollectionInsights)
@@ -84,12 +95,20 @@ async def insights(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    entries = (
-        db.query(CollectionEntry).filter(CollectionEntry.user_id == current_user.id).all()
+    # El análisis siempre se basa en los PRIMEROS 6 Pokémon que el usuario
+    # agregó (orden cronológico de creación), aunque tenga más en su
+    # colección — pedido explícito: "basado en los primeros 6 pokemon de su
+    # coleccion (en caso de que tenga mas)".
+    all_entries = (
+        db.query(CollectionEntry)
+        .filter(CollectionEntry.user_id == current_user.id)
+        .order_by(CollectionEntry.created_at.asc())
+        .all()
     )
-    if not entries:
+    if not all_entries:
         raise HTTPException(
             status_code=422,
             detail="Agrega al menos un Pokémon a tu colección para poder generar insights.",
         )
-    return await generate_collection_insights(entries)
+    first_six = all_entries[:6]
+    return await generate_collection_insights(first_six)

@@ -20,6 +20,63 @@ from app.schemas.pokemon import PokemonDetail, PokemonListResponse, PokemonStat,
 settings = get_settings()
 
 
+# --- Traducciones estáticas ES usadas por las funcionalidades de IA --------
+# (Vision, MCP tools, Insights): se resuelven aquí, contra datos reales de
+# PokéAPI o mapeos fijos, en vez de pedírselo al modelo — mismo principio que
+# get_type_matchups (no confiar en que el modelo "recuerde" bien tablas fijas).
+
+TYPE_NAME_ES: dict[str, str] = {
+    "normal": "normal", "fire": "fuego", "water": "agua", "electric": "eléctrico",
+    "grass": "planta", "ice": "hielo", "fighting": "lucha", "poison": "veneno",
+    "ground": "tierra", "flying": "volador", "psychic": "psíquico", "bug": "bicho",
+    "rock": "roca", "ghost": "fantasma", "dragon": "dragón", "dark": "siniestro",
+    "steel": "acero", "fairy": "hada",
+}
+
+
+def translate_types_es(types: list[str]) -> list[str]:
+    """Traduce una lista de tipos (slugs en inglés de PokéAPI) a español,
+    dejando el original si no está en el mapeo (no debería pasar con los 18
+    tipos oficiales, pero evita romper la respuesta si PokéAPI agrega algo)."""
+    return [TYPE_NAME_ES.get(t.lower(), t) for t in types]
+
+
+# generation-i..ix de PokéAPI -> juego(s) de esa generación en español. Se usa
+# para "¿en qué juego salió por primera vez este Pokémon?" a partir del campo
+# `generation` de /pokemon-species/{id} (dato real, no una fecha inventada).
+_GENERATION_GAMES_ES: dict[str, str] = {
+    "generation-i": "Pokémon Rojo, Azul y Amarillo",
+    "generation-ii": "Pokémon Oro, Plata y Cristal",
+    "generation-iii": "Pokémon Rubí, Zafiro y Esmeralda",
+    "generation-iv": "Pokémon Diamante, Perla y Platino",
+    "generation-v": "Pokémon Negro y Blanco (y sus secuelas B2/W2)",
+    "generation-vi": "Pokémon X y Y",
+    "generation-vii": "Pokémon Sol y Luna",
+    "generation-viii": "Pokémon Espada y Escudo",
+    "generation-ix": "Pokémon Escarlata y Púrpura",
+}
+
+# `habitat` de /pokemon-species/{id} -> zonas en español. PokéAPI dejó de
+# poblar este campo para Pokémon de generaciones más recientes (queda `null`)
+# — en ese caso se devuelve un mensaje explícito en vez de inventar una zona.
+_HABITAT_ES: dict[str, str] = {
+    "cave": "cuevas",
+    "forest": "bosques",
+    "grassland": "praderas y pastizales",
+    "mountain": "montañas",
+    "rare": "zonas poco comunes o especiales",
+    "rough-terrain": "terrenos escarpados y rocosos",
+    "sea": "mar y océanos",
+    "urban": "zonas urbanas, cerca de las personas",
+    "waters-edge": "orillas de ríos y lagos",
+}
+
+_HABITAT_DESCONOCIDO_ES = (
+    "PokéAPI no tiene un hábitat estandarizado registrado para este Pokémon "
+    "(común en generaciones más recientes) — varía según la zona del juego."
+)
+
+
 class PokeAPIClient:
     def __init__(self) -> None:
         self._base_url = settings.pokeapi_base_url
@@ -180,6 +237,36 @@ class PokeAPIClient:
         weak_against -= set()  # (se deja explícito por si se agrega lógica futura)
 
         return sorted(strong_against), sorted(weak_against)
+
+    async def get_species_info(self, id_or_name: str | int) -> dict:
+        """Devuelve datos "de especie" (no de una forma/variante puntual) de
+        `/pokemon-species/{id}`: la generación en que debutó y su hábitat.
+
+        Usado por la funcionalidad de Vision (bonus 1) para "¿en qué juego
+        salió por primera vez?" / "¿en qué zonas es fácil encontrarlo?" —
+        igual que get_type_matchups, se resuelve contra el dato real de
+        PokéAPI en vez de pedírselo al modelo de IA, para no arriesgarse a
+        que alucine un juego o una zona que no es.
+        """
+        cache_key = f"species:{str(id_or_name).lower()}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+        data = await self._get(f"/pokemon-species/{str(id_or_name).lower()}")
+        generation = (data.get("generation") or {}).get("name")
+        habitat = (data.get("habitat") or {}).get("name")
+
+        result = {
+            "generation": generation,
+            "first_appearance_game": _GENERATION_GAMES_ES.get(
+                generation, "No disponible (PokéAPI no reporta la generación de este Pokémon)"
+            ),
+            "habitat": habitat,
+            "habitat_zones": _HABITAT_ES.get(habitat, _HABITAT_DESCONOCIDO_ES),
+        }
+        self._cache_set(cache_key, result)
+        return result
 
 
 _client_singleton: PokeAPIClient | None = None

@@ -8,14 +8,25 @@ from pydantic import BaseModel, Field
 
 
 class PokemonVisionResult(BaseModel):
+    entry_id: str | None = Field(
+        default=None, description="ID de esta consulta en el historial (None hasta que se persiste)"
+    )
+    created_at: str | None = Field(default=None, description="Timestamp ISO de cuándo se hizo la consulta")
+
     image_url: str = Field(description="URL de la foto subida por el usuario (Cloud Storage/local)")
 
     pokemon_name: str = Field(description="Nombre del Pokémon identificado por el modelo")
     description: str = Field(description="Descripción breve generada por el modelo")
-    fun_fact: str = Field(description="Un dato curioso sobre el Pokémon")
     confidence: str = Field(
         description="Qué tan seguro dice estar el modelo de la identificación (texto libre, ej. 'alta'/'media'/'baja')"
     )
+
+    # "En qué juego salió por primera vez" / "en qué zonas es fácil encontrarlo".
+    # Se le pide un estimado al modelo como respaldo, pero se sobreescribe con
+    # el dato real de PokéAPI (generación / hábitat) cuando el nombre
+    # identificado se resuelve contra la Pokédex oficial — ver services/ai/vision.py.
+    first_appearance_game: str = Field(description="Juego(s) en que el Pokémon apareció por primera vez")
+    habitat_zones: str = Field(description="Zonas/hábitats donde suele ser fácil encontrar a este Pokémon")
 
     # Resueltos contra PokéAPI (no directamente del modelo) cuando el nombre
     # identificado existe en el catálogo real — ver services/ai/vision.py.
@@ -24,8 +35,14 @@ class PokemonVisionResult(BaseModel):
     )
     sprite_url: str | None = None
     types: list[str] = Field(default_factory=list)
-    strong_against: list[str] = Field(default_factory=list, description="Tipos contra los que es fuerte")
-    weak_against: list[str] = Field(default_factory=list, description="Tipos contra los que es débil")
+    strong_against: list[str] = Field(default_factory=list, description="Tipos (slug EN) contra los que es fuerte")
+    weak_against: list[str] = Field(default_factory=list, description="Tipos (slug EN) contra los que es débil")
+    strong_against_es: list[str] = Field(
+        default_factory=list, description="Igual que strong_against, traducido a español (mismo orden)"
+    )
+    weak_against_es: list[str] = Field(
+        default_factory=list, description="Igual que weak_against, traducido a español (mismo orden)"
+    )
 
 
 # --- 2. Chat MCP (Claude Sonnet 5) ----------------------------------------
@@ -44,30 +61,59 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     history: list[ChatMessage]
+    history_persisted: bool = Field(
+        default=True,
+        description=(
+            "false si Claude sí respondió pero no se pudo guardar este turno en Firestore "
+            "(el chat sigue funcionando igual, solo no queda guardado para la próxima vez)"
+        ),
+    )
 
 
 # --- 3. Insights de colección (Gemini 2.5 Flash) --------------------------
+
+
+class AnalyzedTeamMember(BaseModel):
+    """Uno de los primeros 6 Pokémon de la colección del usuario — el equipo
+    real sobre el que se basa TODO el análisis. Se arma directamente desde la
+    base de datos (no desde el modelo), así que sprite_url siempre es el real."""
+
+    pokemon_name: str
+    sprite_url: str | None = None
+    types: list[str] = Field(default_factory=list)
+
+
+class AlternativeSuggestion(BaseModel):
+    pokemon_name: str
+    reason: str
+    sprite_url: str | None = None
 
 
 class TeamRecommendation(BaseModel):
     pokemon_name: str
     reason: str
     already_in_collection: bool = False
+    sprite_url: str | None = None
+    alternatives: list[AlternativeSuggestion] = Field(
+        default_factory=list,
+        description="Otros Pokémon que podrían ocupar este mismo puesto del equipo ideal",
+    )
 
 
 class FunFactEntry(BaseModel):
     pokemon_name: str
     fact: str
-
-
-class SuggestedAddition(BaseModel):
-    pokemon_name: str
-    reason: str
+    sprite_url: str | None = None
 
 
 class CollectionInsights(BaseModel):
+    analyzed_team: list[AnalyzedTeamMember] = Field(
+        default_factory=list,
+        description="Los primeros 6 Pokémon de la colección del usuario (o menos si tiene menos) — base de todo el análisis",
+    )
+    team_score: int = Field(ge=1, le=10, description="Qué tan bueno es este equipo, de 1 a 10")
+    team_score_reason: str = Field(default="", description="Por qué obtuvo ese puntaje")
     ideal_team: list[TeamRecommendation] = Field(default_factory=list, max_length=6)
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     fun_facts: list[FunFactEntry] = Field(default_factory=list)
-    suggested_additions: list[SuggestedAddition] = Field(default_factory=list)
