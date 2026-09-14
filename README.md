@@ -187,7 +187,7 @@ de cada decisión de arquitectura está en
 | [`docs/CI_CD.md`](docs/CI_CD.md) | Cómo funciona el pipeline de Cloud Build y su configuración |
 | [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md) | Probar la API (CRUD de colección y endpoints de IA) con Postman |
 | [`docs/Documentacion_de_Nube_GCP.pdf`](docs/Documentacion_de_Nube_GCP.pdf) | Documentación formal del proyecto de nube: contexto, IAM, cómputo, datos e IA, CI/CD y recomendaciones para producción |
-| [`docs/Documentacion_de_la_app.pdf`](docs/Documentacion_de_Nube_GCP.pdf) | Documentación formal del proyecto de nube: contexto, IAM, cómputo, datos e IA, CI/CD y recomendaciones para producción |
+| [`docs/Documentacion_de_la_app.pdf`](docs/Documentacion_de_la_App.pdf) | Documentación formal del proyecto de nube: contexto, IAM, cómputo, datos e IA, CI/CD y recomendaciones para producción |
 
 ## Decisiones técnicas y trade-offs
 
