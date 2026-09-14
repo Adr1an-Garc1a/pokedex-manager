@@ -21,9 +21,6 @@
 # múltiples orígenes separados por coma (ver cors_origins_list).
 # =============================================================================
 
-# get_all_service_urls <service_name> <project_id> <region>
-# Imprime por stdout "https://url1,https://url2,..." (vacío si el servicio
-# no existe todavía o no se pudo consultar — nunca falla el script llamador).
 get_all_service_urls() {
   local service="$1" project="$2" region="$3"
   gcloud run services describe "${service}" \

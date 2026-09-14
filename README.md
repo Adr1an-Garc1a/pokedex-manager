@@ -97,25 +97,14 @@ el detalle y las decisiones de arquitectura detrás de cada una.
 
 ## Probar la instancia desplegada
 
-Todo el proyecto vive desplegado en Google Cloud Platform — no hace falta
-instalar nada para evaluarlo:
+Para calificar esta prueba no hace falta instalar nada. He generado un proyecto de Google Cloud Platform para que pueda acceder sin necesidad de levantar el ambiente, pero en caso de que se tenga curiosidad de levantar el ambiente desde cero y de forma detallada, puedes revisar [`docs/GCP_DEPLOYMENT.md`](docs/GCP_DEPLOYMENT.md) o más abajo viene una descripción breve para realizar el despliegue.
+
+A continuación se anexa el link con el cual puedes entrar a la plataforma de Pokedex Manager por Adrián García.
 
 **[pokedex-manager-frontend-472849722290.us-central1.run.app/login](https://pokedex-manager-frontend-472849722290.us-central1.run.app/login)**
 
-Inicia sesión con cualquier cuenta de Google; si es la primera vez, se
-completa un registro breve.
+Inicia sesión con cualquier cuenta de Google; si es la primera vez, se completa un registro breve.
 
-## Tests del backend
-
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pytest -q
-```
-
-Corre contra una base SQLite efímera (no necesita Cloud SQL ni ninguna
-credencial de GCP/Anthropic — los servicios externos están mockeados).
 
 ## Replicar el despliegue en tu propio proyecto de GCP
 
@@ -165,7 +154,6 @@ pokedex-manager/
 │   │   ├── services/    # PokeAPIClient, StorageService (GCS), team.py, services/ai/*
 │   │   └── api/v1/      # routers: auth, pokemon, collection, ai
 │   ├── migrations/       # Alembic
-│   └── tests/            # pytest (mockea Google/PokéAPI/Vertex/Anthropic/Firestore)
 ├── frontend/            # React + Vite + Tailwind + TanStack Query
 │   └── src/
 │       ├── api/          # cliente HTTP tipado por recurso
@@ -199,6 +187,7 @@ de cada decisión de arquitectura está en
 | [`docs/CI_CD.md`](docs/CI_CD.md) | Cómo funciona el pipeline de Cloud Build y su configuración |
 | [`docs/POSTMAN_GUIDE.md`](docs/POSTMAN_GUIDE.md) | Probar la API (CRUD de colección y endpoints de IA) con Postman |
 | [`docs/Documentacion_de_Nube_GCP.pdf`](docs/Documentacion_de_Nube_GCP.pdf) | Documentación formal del proyecto de nube: contexto, IAM, cómputo, datos e IA, CI/CD y recomendaciones para producción |
+| [`docs/Documentacion_de_la_app.pdf`](docs/Documentacion_de_Nube_GCP.pdf) | Documentación formal del proyecto de nube: contexto, IAM, cómputo, datos e IA, CI/CD y recomendaciones para producción |
 
 ## Decisiones técnicas y trade-offs
 

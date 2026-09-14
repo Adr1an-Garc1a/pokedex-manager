@@ -18,9 +18,7 @@ if gcloud firestore databases describe --database="(default)" --project="${PROJE
   echo "   Ya existe, se omite creación."
 else
   echo ">> Creando base de datos Firestore (modo Native, región ${VERTEX_LOCATION})..."
-  # nam5 / eur3 son las multi-regiones más comunes; si tu proyecto ya tiene
-  # recursos en una región puntual (como Cloud SQL), gcloud igual acepta esa
-  # región para Firestore siempre que exista como ubicación válida.
+  
   gcloud firestore databases create \
     --project="${PROJECT_ID}" \
     --location="${VERTEX_LOCATION}" \

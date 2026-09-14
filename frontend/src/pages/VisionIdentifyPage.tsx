@@ -32,18 +32,12 @@ export function VisionIdentifyPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  // Arranca ya con lo que quedó guardado en localStorage de una visita
-  // anterior — así el historial se ve completo desde el primer render, sin
-  // esperar a que responda el backend.
+
   const [cachedResults, setCachedResults] = useState<PokemonVisionResult[]>(() =>
     user ? loadCachedVisionHistory(user.id) : []
   );
 
-  // Las queryKey llevan el id del usuario: sin esto, cambiar de cuenta en la
-  // misma sesión del navegador podía seguir mostrando (por un instante, o si
-  // el refetch tardaba) los datos EN CACHÉ de la cuenta anterior — mismo bug
-  // de fondo reportado en Insights. Con el id en la key, cada cuenta tiene su
-  // propia entrada de caché de React Query, nunca comparten una.
+
   const { data: myCollection } = useQuery({
     queryKey: ["collection", "ids-only", userId],
     queryFn: listMyCollection,
@@ -57,12 +51,6 @@ export function VisionIdentifyPage() {
     enabled: !!userId,
   });
 
-  // Cuando llega (o cambia) el historial del backend, se fusiona con el
-  // caché local y se vuelve a guardar en localStorage — el SERVIDOR gana en
-  // caso de conflicto (ver el porqué en el docstring de mergeHistory arriba)
-  // para que el caché se "autocure" de verdad con lo que Firestore confirmó,
-  // sin perder nunca lo que ya se había identificado en este dispositivo y
-  // aún no se refleja en el servidor.
   useEffect(() => {
     if (!user || !serverHistory) return;
     setCachedResults((prev) => {
@@ -118,7 +106,7 @@ export function VisionIdentifyPage() {
         </h1>
         <p className="text-poke-ink-soft">
           Sube una foto (una carta, un peluche, una captura de pantalla...) y averigüemos
-          quién es — además obtendrás datos importantes del Pokémon que subas.
+          quién es — además obtendrás datos importantes del Pokémon que subas. (Usando Gemini 2.5 Flash)
         </p>
       </div>
 

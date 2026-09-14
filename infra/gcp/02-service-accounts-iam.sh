@@ -15,10 +15,6 @@ if ! gcloud iam service-accounts describe "${RUNTIME_SA_EMAIL}" --project="${PRO
     --project="${PROJECT_ID}" \
     --display-name="PokéDex Manager - runtime (Cloud Run)"
 
-  # IAM tarda unos segundos en propagar una service account recién creada al
-  # Resource Manager. Sin esta espera, el primer add-iam-policy-binding de
-  # abajo puede fallar con "Service account ... does not exist" aunque la SA
-  # sí exista (condición de carrera conocida de gcloud).
   echo ">> Esperando a que la service account se propague en IAM..."
   for i in $(seq 1 30); do
     if gcloud iam service-accounts describe "${RUNTIME_SA_EMAIL}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
@@ -26,7 +22,7 @@ if ! gcloud iam service-accounts describe "${RUNTIME_SA_EMAIL}" --project="${PRO
     fi
     sleep 2
   done
-  sleep 10  # margen adicional: describe puede responder antes de que Resource Manager esté listo
+  sleep 10  
 else
   echo "   Ya existe, se omite creación."
 fi

@@ -27,9 +27,6 @@ substitutions:
   _SECRET_ANTHROPIC_API_KEY: pokedex-manager-anthropic-api-key
   _VERTEX_LOCATION: us-central1
   _GEMINI_MODEL: gemini-2.5-flash
-  # claude-haiku-4-5 por defecto (mucho más barato, sigue soportando MCP) —
-  # cambia a claude-sonnet-5 antes de la entrega final si el enunciado lo
-  # exige literalmente (ver docs/BONUS_FEATURES.md).
   _ANTHROPIC_MODEL: claude-haiku-4-5-20251001
 
 options:

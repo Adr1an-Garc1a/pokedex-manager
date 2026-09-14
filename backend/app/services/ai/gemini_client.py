@@ -25,7 +25,7 @@ _client_singleton = None
 def _get_client():
     global _client_singleton
     if _client_singleton is None:
-        from google import genai  # import perezoso: solo si se usa una función de IA
+        from google import genai  
 
         _client_singleton = genai.Client(
             vertexai=True,
@@ -47,7 +47,7 @@ async def generate_structured_json(
     Lanza HTTPException(503) si Vertex AI no está configurado/disponible en
     este entorno, o HTTPException(502) si el modelo no devolvió JSON válido.
     """
-    from google.genai import types  # import perezoso, mismo motivo que _get_client
+    from google.genai import types  
 
     try:
         client = _get_client()

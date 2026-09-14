@@ -54,13 +54,6 @@ class Settings(BaseSettings):
     # docs/BONUS_FEATURES.md). Si queda vacía, el endpoint de chat responde 503
     # en vez de fallar el arranque del backend.
     anthropic_api_key: str = ""
-    # claude-haiku-4-5 por defecto: ~5x más barato que Sonnet 5 en tokens de
-    # entrada ($1 vs $2 por MTok) y 2x en salida ($5 vs $10 por MTok), sigue
-    # soportando tool use (MCP) perfectamente para una colección personal
-    # pequeña — pensado para no gastar la cuota de la API key en pruebas.
-    # Si el enunciado exige explícitamente "Claude Sonnet 5", cambia este
-    # valor a "claude-sonnet-5" antes de la entrega final (una sola variable
-    # de entorno, no requiere tocar código) — ver docs/BONUS_FEATURES.md.
     anthropic_model: str = "claude-haiku-4-5-20251001"
 
     @property

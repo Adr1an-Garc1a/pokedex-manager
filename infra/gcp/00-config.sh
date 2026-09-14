@@ -47,9 +47,6 @@ export SECRET_ANTHROPIC_API_KEY="${APP_NAME}-anthropic-api-key"
 # --- IA (funcionalidades bonus) ---
 export VERTEX_LOCATION="${VERTEX_LOCATION:-${REGION}}"
 export GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
-# claude-haiku-4-5 por defecto: mucho más barato que Sonnet 5, sigue
-# soportando MCP/tool use bien para esta app — cambia esta variable (sin
-# tocar código) a claude-sonnet-5 si necesitas ese modelo específico.
 export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}"
 
 echo "Config cargada: PROJECT_ID=${PROJECT_ID} REGION=${REGION} APP_NAME=${APP_NAME}"

@@ -23,17 +23,9 @@ echo "   Imagen backend: ${BACKEND_IMAGE}"
 
 echo ""
 echo ">> Construyendo y publicando imagen del frontend con Cloud Build..."
-# Nota: el frontend necesita conocer la URL pública del backend en build-time
-# (Vite incrusta VITE_API_BASE_URL al compilar). Si el backend aún no se ha
-# desplegado, usa un valor temporal y vuelve a construir el frontend después
-# de correr 08-deploy-backend.sh.
+
 BACKEND_URL="${BACKEND_URL:-https://REEMPLAZA-DESPUES-DE-DESPLEGAR-BACKEND}"
 
-# gcloud no permite combinar --tag con --config, así que el tag de la imagen
-# va dentro del propio archivo de config (no como flag aparte). Se escribe a
-# un archivo temporal real (más confiable que una sustitución de procesos
-# <(...) con gcloud) y los valores de build-arg se interpolan directamente
-# aquí en bash, sin depender del mecanismo de --substitutions de Cloud Build.
 CLOUDBUILD_CONFIG="$(mktemp /tmp/pokedex-frontend-cloudbuild.XXXXXX.yaml)"
 cat > "${CLOUDBUILD_CONFIG}" <<EOF
 steps:
